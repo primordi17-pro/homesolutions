@@ -2517,6 +2517,7 @@ function openProductCategoryModal(catId = null) {
 function closeProductCategoryModal() { document.getElementById('productCategoryModal').classList.remove('active'); }
 
 async function saveProductCategory(event) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar categorías.','warning','Acceso restringido');return;}
     event.preventDefault();
     const catId = document.getElementById('productCategoryId').value;
     const name  = document.getElementById('productCategoryName').value.trim();
@@ -2535,6 +2536,7 @@ async function saveProductCategory(event) {
 }
 
 async function toggleProductCategoryActive(catId, currentlyActive) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar categorías.','warning','Acceso restringido');return;}
     const cat = await getRecordById('categories', catId);
     if (!cat) return;
     cat.isActive = !currentlyActive;
@@ -2545,6 +2547,7 @@ async function toggleProductCategoryActive(catId, currentlyActive) {
 }
 
 async function deleteProductCategory(catId) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar categorías.','warning','Acceso restringido');return;}
     const cat = await getRecordById('categories', catId);
     if (!cat) return;
     const products = await getAllRecords('products');
@@ -2630,6 +2633,7 @@ function openLocationModal(locId = null) {
 function closeLocationModal() { document.getElementById('locationModal').classList.remove('active'); }
 
 async function saveLocation(event) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar locaciones.','warning','Acceso restringido');return;}
     event.preventDefault();
     const locId = document.getElementById('locationId').value;
     const name  = document.getElementById('locationName').value.trim();
@@ -2651,6 +2655,7 @@ async function saveLocation(event) {
 }
 
 async function toggleLocationActive(locId, currentlyActive) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar locaciones.','warning','Acceso restringido');return;}
     if (currentlyActive) {
         // Bloqueo: no desactivar una locación con productos existentes — se quedarían huérfanos de vista
         const prods = await getAllRecords('products');
@@ -3091,6 +3096,7 @@ async function editProduct(id) {
 }
 
 async function deleteProduct(id) {
+    if(!ROLES[currentRole]?.canDeleteProduct){await appAlert('Tu rol no puede eliminar productos.','warning','Acceso restringido');return;}
     if (await appConfirm('El historial conservará el nombre del producto.','warning','🗑️ Eliminar producto','Eliminar','Cancelar','danger')) {
         const product = await getRecordById('products', id);
         if (product) {
@@ -4093,6 +4099,7 @@ async function saveExchangeRateToStore(currency, rate) {
     if (currency === 'USD') setExchangeRate(rate);
 }
 async function saveExchangeRate(event) {
+    if(!ROLES[currentRole]?.canEditExchangeRate){await appAlert('Tu rol no puede modificar el tipo de cambio.','warning','Acceso restringido');return;}
     event.preventDefault();
     const newRate=parseFloat(document.getElementById('exchangeRateInput').value);
     if (newRate<=0) { await appAlert('La tasa debe ser mayor que 0.','warning','Valor inválido'); return; }
@@ -4109,6 +4116,7 @@ async function saveExchangeRate(event) {
 
 // ── Tasa de cambio editable por vendedores (cuadro en Inventario) ──
 async function saveVendorExchangeRate() {
+    if(!ROLES[currentRole]?.canEditExchangeRate){await appAlert('Tu rol no puede modificar el tipo de cambio.','warning','Acceso restringido');return;}
     const input = document.getElementById('vendorRateInput');
     const newRate = parseFloat(input.value);
     if (isNaN(newRate) || newRate <= 0) {
@@ -4437,6 +4445,7 @@ function renderSummaryPage() {
 function loadDailySalesReport() { return loadSalesReport(); }
 
 async function exportDailySalesExcel() {
+    if(!ROLES[currentRole]?.canExport){await appAlert('Tu rol no puede exportar reportes.','warning','Acceso restringido');return;}
     const products = await getAllRecords('products');
     const movements = await getAllRecords('movements');
     const rate = getExchangeRate();
@@ -4620,6 +4629,7 @@ async function exportDailySalesExcel() {
 }
 
 async function exportProductsExcel() {
+    if(!ROLES[currentRole]?.canExport){await appAlert('Tu rol no puede exportar el inventario.','warning','Acceso restringido');return;}
     const products=await getAllRecords('products'); const workbook=new ExcelJS.Workbook(); const worksheet=workbook.addWorksheet('Inventario');
     const rate=getExchangeRate();
     worksheet.columns=[
@@ -4658,6 +4668,7 @@ async function exportProductsExcel() {
 }
 
 async function exportMovementsExcel() {
+    if(!ROLES[currentRole]?.canExport){await appAlert('Tu rol no puede exportar movimientos.','warning','Acceso restringido');return;}
     const movements = await getAllRecords('movements');
     const products  = await getAllRecords('products');
     const workbook  = new ExcelJS.Workbook();
@@ -4767,6 +4778,7 @@ function debounce(fn, delay) {
 
 // ══ BACKUP ══
 async function exportBackupJSON() {
+    if(!ROLES[currentRole]?.canBackup){await appAlert('Tu rol no puede exportar copias de seguridad.','warning','Acceso restringido');return;}
     const products=await getAllRecords('products'); const movements=await getAllRecords('movements');
     const stockLots=await getAllRecords('stockLots');
     const costHistory=await getAllRecords('costHistory');
@@ -4786,6 +4798,7 @@ async function exportBackupJSON() {
 }
 
 async function importBackupJSON(event) {
+    if(!ROLES[currentRole]?.canBackup){await appAlert('Tu rol no puede importar copias de seguridad.','warning','Acceso restringido');event.target.value='';return;}
     const file=event.target.files[0]; if (!file) return;
     const reader=new FileReader();
     reader.onload=async(e)=>{
