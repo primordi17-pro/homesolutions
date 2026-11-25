@@ -3925,15 +3925,17 @@ async function undoMovement(movementId) {
     if (movement.type === 'Transferencia') {
         for (const item of items) {
             const destId=item.destProductId;
+            const relatedItems=items.filter(x=>x.destProductId===destId);
+            const expectedQty=relatedItems.reduce((n,x)=>n+x.quantity,0);
             const dest=destId?await getRecordById('products',destId):null;
-            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation&&l.productId===item.destProductId);
-            if(!dest||dest.quantity<item.quantity||!Array.isArray(item.lotAllocations)||!item.lotAllocations.length||!movedLots.length){
+            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation&&l.productId===destId);
+            if(!dest||dest.quantity<expectedQty||relatedItems.some(x=>!Array.isArray(x.lotAllocations)||!x.lotAllocations.length)||!movedLots.length){
                 await appAlert('No se puede revertir esta transferencia con seguridad: faltan las capas FIFO de destino o el stock ya no está completo.','warning','Transferencia no reversible');
                 return;
             }
             const movedQty=movedLots.reduce((n,l)=>n+(l.originalQuantity||0),0);
             const consumed=movedLots.some(l=>(l.quantityRemaining||0)<(l.originalQuantity||0));
-            if(consumed||movedQty!==item.quantity){
+            if(consumed||movedQty!==expectedQty){
                 await appAlert('No se puede revertir esta transferencia porque parte de las capas transferidas ya fue consumida o movida. Deshaz primero los movimientos posteriores.','warning','Capas FIFO utilizadas');
                 return;
             }
