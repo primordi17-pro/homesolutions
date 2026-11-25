@@ -3713,10 +3713,10 @@ async function saveMovement(event) {
     }
     if (type==='Transferencia') {
         const newLoc=document.getElementById('movementNewLocation').value;
-        const srcLoc=sourceLocation||(itemsToProcess[0]&&itemsToProcess[0].product.location)||'';
-        if (newLoc&&srcLoc&&newLoc===srcLoc) {
-            await appAlert(`Destino ("${newLoc}") igual al origen. Selecciona una ubicación diferente.`,'warning','⚠️ Transferencia inválida'); return;
-        }
+        const destination=(window.__locationCache||[]).find(l=>l.name===newLoc&&l.isActive!==false&&l.special!=='merma');
+        if(!destination){await appAlert('Selecciona una locación de destino activa.','warning','Destino inválido');return;}
+        const sameSource=itemsToProcess.find(x=>x.product.location===newLoc);
+        if(sameSource){await appAlert(`El destino ("${newLoc}") coincide con el origen de ${sameSource.product.brand}. Selecciona otra locación.`,'warning','⚠️ Transferencia inválida');return;}
     }
 
     // ── Paso 2: procesar stock y guardar UN movimiento por producto ──
