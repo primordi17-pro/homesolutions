@@ -3926,7 +3926,7 @@ async function undoMovement(movementId) {
         for (const item of items) {
             const destId=item.destProductId;
             const dest=destId?await getRecordById('products',destId):null;
-            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation);
+            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation&&l.productId===item.destProductId);
             if(!dest||dest.quantity<item.quantity||!Array.isArray(item.lotAllocations)||!item.lotAllocations.length||!movedLots.length){
                 await appAlert('No se puede revertir esta transferencia con seguridad: faltan las capas FIFO de destino o el stock ya no está completo.','warning','Transferencia no reversible');
                 return;
@@ -3950,7 +3950,7 @@ async function undoMovement(movementId) {
             const orig = snapMap.get(item.productId);
             if (orig) orig.quantity += item.quantity;
             await restoreStockAllocations(item.productId,item.location||movement.sourceLocation,item.lotAllocations||[]);
-            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation);
+            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation&&l.productId===item.destProductId);
             for(const lot of movedLots) await deleteRecord('stockLots',lot.id);
 
             // Restar stock en destino
