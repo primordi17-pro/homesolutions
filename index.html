@@ -3920,6 +3920,26 @@ async function undoMovement(movementId) {
         }
     }
 
+    // Una transferencia solo puede revertirse si las capas que creó siguen intactas en destino.
+    // Si fueron vendidas, mermadas o transferidas de nuevo, borrarlas rompería el historial FIFO.
+    if (movement.type === 'Transferencia') {
+        for (const item of items) {
+            const destId=item.destProductId;
+            const dest=destId?await getRecordById('products',destId):null;
+            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation);
+            if(!dest||dest.quantity<item.quantity||!Array.isArray(item.lotAllocations)||!item.lotAllocations.length||!movedLots.length){
+                await appAlert('No se puede revertir esta transferencia con seguridad: faltan las capas FIFO de destino o el stock ya no está completo.','warning','Transferencia no reversible');
+                return;
+            }
+            const movedQty=movedLots.reduce((n,l)=>n+(l.originalQuantity||0),0);
+            const consumed=movedLots.some(l=>(l.quantityRemaining||0)<(l.originalQuantity||0));
+            if(consumed||movedQty!==item.quantity){
+                await appAlert('No se puede revertir esta transferencia porque parte de las capas transferidas ya fue consumida o movida. Deshaz primero los movimientos posteriores.','warning','Capas FIFO utilizadas');
+                return;
+            }
+        }
+    }
+
     // LB-2: para Transferencia usar snapshot — evitar race condition al tocar dos productos
     if (movement.type === 'Transferencia') {
         const allProds = await getAllRecords('products');
@@ -3956,11 +3976,8 @@ async function undoMovement(movementId) {
         for (const [pid, prod] of snapMap) {
             const orig = allProds.find(p => p.id === pid);
             if (!orig) continue;
-            if (prod.quantity <= 0 && orig.quantity > 0) {
-                // destino quedó en 0 — eliminar
-                const wasOrigin = items.some(i => i.productId === pid);
-                if (!wasOrigin) { await deleteRecord('products', pid); continue; }
-            }
+            // Conservar productos destino con stock cero: los movimientos históricos
+            // siguen referenciando su ID y pueden necesitarse para auditoría.
             await updateRecord('products', prod);
         }
 
