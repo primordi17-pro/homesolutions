@@ -2982,6 +2982,7 @@ async function saveProduct(event) {
     let originalDateAdded = Date.now();
     if (productId) {
         const originalProduct = await getRecordById('products', parseInt(productId));
+        if(role.canViewCost&&originalProduct&&(roundCUP(price)!==roundCUP(originalProduct.price||0)||roundCUP(salePrice)!==roundCUP(originalProduct.salePrice||originalProduct.price||0))){await appAlert('Los precios de las existencias nuevas se establecen al registrar una Entrada. No cambies precios desde la ficha del producto, para conservar la valoración histórica de los lotes.','warning','Actualiza precios mediante una Entrada');return;}
        originalDateAdded = (originalProduct && originalProduct.dateAdded)
         ? originalProduct.dateAdded
         : Date.now();
