@@ -1,0 +1,41 @@
+name: Validate inventory app
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, feature/inventory-fifo-merma-roles]
+
+jobs:
+  inline-javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Parse inline JavaScript
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const assert = require('node:assert/strict');
+          const html = fs.readFileSync('index.html', 'utf8');
+          const scripts = [...html.matchAll(/<script\\b[^>]*>([\\s\\S]*?)<\\/script>/gi)]
+            .map(match => match[1])
+            .filter(source => source.trim().length > 0);
+          assert.ok(scripts.length > 0, 'No inline JavaScript blocks found in index.html');
+          for (const [index, source] of scripts.entries()) {
+            try {
+              new Function(source);
+            } catch (error) {
+              console.error('Inline script #' + (index + 1) + ' has a syntax error:', error);
+              process.exitCode = 1;
+            }
+          }
+          assert.match(html, /async function consumeStockFIFO/);
+          assert.match(html, /if\\(available<q\\)/);
+          assert.match(html, /!ROLES\\[currentRole\\]\\.movements\\.includes\\(type\\)/);
+          assert.match(html, /Capas FIFO utilizadas/);
+          console.log('Inline JavaScript parsed and critical inventory guards found.');
+          NODE
