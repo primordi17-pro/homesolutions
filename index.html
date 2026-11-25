@@ -1635,6 +1635,7 @@
                                 <th>Fecha</th>
                                 <th>Producto</th>
                                 <th>Categoría</th>
+                                <th>Ubicación</th>
                                 <th>Uds. Vendidas</th>
                                 <th>P. Compra Prom.</th>
                                 <th>P. Venta Prom.</th>
@@ -4331,11 +4332,12 @@ async function loadSalesReport() {
             const product         = products.find(p=>p.id===item.productId);
             const productName     = product ? `${product.brand} - ${product.color}` : (item.archivedName||'⚠️ Eliminado');
             const productCategory = product ? product.category : (item.archivedCategory||'—');
-            const costPrice       = roundCUP(item.costPrice||(product ? product.price : 0));
-            const salePrice       = roundCUP(item.salePrice||costPrice);
-            const mapKey = `${dayTs}|${productName}`;
+            const productLocation = item.location||(product ? product.location : (item.archivedLocation||'—'));
+            const costPrice       = roundCUP(item.costPrice??(product ? product.price : 0));
+            const salePrice       = roundCUP(item.salePrice??costPrice);
+            const mapKey = `${dayTs}|${productName}|${productLocation}`;
             if (!summaryMap.has(mapKey)) {
-                summaryMap.set(mapKey, { dateKey, dayTs, productName, productCategory, costPriceSum:0, salePriceSum:0, totalUSD:0, profitUSD:0, totalCUP:0, profitCUP:0, quantity:0, rowCount:0 });
+                summaryMap.set(mapKey, { dateKey, dayTs, productName, productCategory, productLocation, costValueSum:0, saleValueSum:0, totalUSD:0, profitUSD:0, totalCUP:0, profitCUP:0, quantity:0 });
             }
             const r = summaryMap.get(mapKey);
             const itemTotalUSD  = roundCUP(salePrice*item.quantity);
@@ -4345,21 +4347,21 @@ async function loadSalesReport() {
             r.profitUSD    = roundCUP(r.profitUSD   + itemProfitUSD);
             r.totalCUP     = roundCUP(r.totalCUP    + roundCUP(itemTotalUSD*histRate));
             r.profitCUP    = roundCUP(r.profitCUP   + roundCUP(itemProfitUSD*histRate));
-            r.costPriceSum = roundCUP(r.costPriceSum + costPrice);
-            r.salePriceSum = roundCUP(r.salePriceSum + salePrice);
-            r.rowCount++;
+            r.costValueSum = roundCUP(r.costValueSum + roundCUP(costPrice*item.quantity));
+            r.saleValueSum = roundCUP(r.saleValueSum + roundCUP(salePrice*item.quantity));
         }
     }
     // Ordenar: por fecha asc, luego por producto asc
     reportSummaryCache = Array.from(summaryMap.values())
-        .sort((a,b)=> a.dayTs!==b.dayTs ? a.dayTs-b.dayTs : a.productName.localeCompare(b.productName))
+        .sort((a,b)=> a.dayTs!==b.dayTs ? a.dayTs-b.dayTs : a.productName.localeCompare(b.productName) || a.productLocation.localeCompare(b.productLocation))
         .map(r=>({
             dateKey:       r.dateKey,
             productName:   r.productName,
             productCategory: r.productCategory,
+            productLocation: r.productLocation,
             quantity:      r.quantity,
-            costPriceAvg:  roundCUP(r.costPriceSum / r.rowCount),
-            salePriceAvg:  roundCUP(r.salePriceSum / r.rowCount),
+            costPriceAvg:  roundCUP(r.costValueSum / r.quantity),
+            salePriceAvg:  roundCUP(r.saleValueSum / r.quantity),
             totalUSD:      r.totalUSD,
             profitUSD:     r.profitUSD,
             totalCUP:      r.totalCUP,
@@ -4441,6 +4443,7 @@ function renderSummaryPage() {
                 <td class="mono" style="font-weight:700;white-space:nowrap;color:var(--navy)">${row.dateKey}</td>
                 <td style="font-weight:600">${row.productName}</td>
                 <td><span class="badge badge-info">${row.productCategory}</span></td>
+                <td style="color:var(--text-2)">${row.productLocation}</td>
                 <td style="font-weight:800;font-size:15px;color:var(--navy)">${row.quantity}</td>
                 <td class="mono" style="color:var(--text-2)">$${row.costPriceAvg.toFixed(2)}</td>
                 <td class="mono" style="font-weight:700">$${row.salePriceAvg.toFixed(2)}</td>
@@ -4451,7 +4454,7 @@ function renderSummaryPage() {
     }
 
     const infoEl = document.getElementById('reportPageInfo');
-    if (infoEl) infoEl.textContent = total===0 ? '' : `Mostrando ${start+1}–${end} de ${total} producto${total!==1?'s':''}`;
+    if (infoEl) infoEl.textContent = total===0 ? '' : `Mostrando ${start+1}–${end} de ${total} combinaciones producto/ubicación`;
 
     renderGenericPagination('reportPaginationControls', reportCurrentPage, totalPages, (p)=>{
         reportCurrentPage = p;
@@ -4496,7 +4499,7 @@ async function exportDailySalesExcel() {
     const sheetName = isSummary ? 'Resumen por Producto' : 'Ventas Detalle';
     const worksheet = workbook.addWorksheet(sheetName);
 
-    const colCount = isSummary ? 9 : 12;
+    const colCount = isSummary ? 10 : 12;
     const colRange = `A1:${String.fromCharCode(64+colCount)}1`;
 
     worksheet.mergeCells(`A1:${String.fromCharCode(64+colCount)}1`);
@@ -4530,6 +4533,7 @@ async function exportDailySalesExcel() {
             { key:'fecha',    width:14 },
             { key:'product',  width:32 },
             { key:'category', width:16 },
+            { key:'location', width:18 },
             { key:'quantity', width:12 },
             { key:'costAvg',  width:18 },
             { key:'saleAvg',  width:18 },
@@ -4538,7 +4542,7 @@ async function exportDailySalesExcel() {
             { key:'totalCUP', width:18 }
         ];
         worksheet.getRow(5).values = [
-            'Fecha','Producto','Categoría','Uds. Vendidas',
+            'Fecha','Producto','Categoría','Ubicación','Uds. Vendidas',
             'P. Compra Prom. (USD)','P. Venta Prom. (USD)',
             'Total Venta (USD)','Ganancia (USD)','Equiv. CUP (tasa histórica)'
         ];
@@ -4559,10 +4563,11 @@ async function exportDailySalesExcel() {
                 const product  = products.find(p=>p.id===item.productId);
                 const pName    = product ? `${product.brand} - ${product.color}` : (item.archivedName||'Eliminado');
                 const cat      = product ? product.category : (item.archivedCategory||'—');
-                const cp       = roundCUP(item.costPrice||(product ? product.price : 0));
-                const sp       = roundCUP(item.salePrice||cp);
-                const key      = `${dayTs}|${pName}`;
-                if (!summaryMap.has(key)) summaryMap.set(key,{dateKey,dayTs,pName,cat,qty:0,totalUSD:0,profitUSD:0,totalCUP:0,cpSum:0,spSum:0,rc:0});
+                const loc      = item.location||(product ? product.location : (item.archivedLocation||'—'));
+                const cp       = roundCUP(item.costPrice??(product ? product.price : 0));
+                const sp       = roundCUP(item.salePrice??cp);
+                const key      = `${dayTs}|${pName}|${loc}`;
+                if (!summaryMap.has(key)) summaryMap.set(key,{dateKey,dayTs,pName,cat,loc,qty:0,totalUSD:0,profitUSD:0,totalCUP:0,cpValue:0,spValue:0});
                 const r = summaryMap.get(key);
                 const itemTotalUSD  = roundCUP(sp*item.quantity);
                 const itemProfitUSD = roundCUP((sp-cp)*item.quantity);
@@ -4570,15 +4575,15 @@ async function exportDailySalesExcel() {
                 r.totalUSD=roundCUP(r.totalUSD+itemTotalUSD);
                 r.profitUSD=roundCUP(r.profitUSD+itemProfitUSD);
                 r.totalCUP=roundCUP(r.totalCUP+roundCUP(itemTotalUSD*histRate));
-                r.cpSum=roundCUP(r.cpSum+cp); r.spSum=roundCUP(r.spSum+sp); r.rc++;
+                r.cpValue=roundCUP(r.cpValue+roundCUP(cp*item.quantity)); r.spValue=roundCUP(r.spValue+roundCUP(sp*item.quantity));
             }
         }
         let totalQty=0, totalUSD=0, totalProfitUSD=0, totalCUPSum=0;
-        const rows = Array.from(summaryMap.values()).sort((a,b)=>a.dayTs!==b.dayTs?a.dayTs-b.dayTs:a.pName.localeCompare(b.pName));
+        const rows = Array.from(summaryMap.values()).sort((a,b)=>a.dayTs!==b.dayTs?a.dayTs-b.dayTs:a.pName.localeCompare(b.pName)||a.loc.localeCompare(b.loc));
         for (const r of rows) {
             totalQty+=r.qty; totalUSD=roundCUP(totalUSD+r.totalUSD); totalProfitUSD=roundCUP(totalProfitUSD+r.profitUSD); totalCUPSum=roundCUP(totalCUPSum+r.totalCUP);
-            worksheet.addRow({ fecha:r.dateKey, product:r.pName, category:r.cat, quantity:r.qty,
-                costAvg:roundCUP(r.cpSum/r.rc), saleAvg:roundCUP(r.spSum/r.rc),
+            worksheet.addRow({ fecha:r.dateKey, product:r.pName, category:r.cat, location:r.loc, quantity:r.qty,
+                costAvg:roundCUP(r.cpValue/r.qty), saleAvg:roundCUP(r.spValue/r.qty),
                 totalUSD:r.totalUSD, profitUSD:r.profitUSD, totalCUP:r.totalCUP });
         }
         ['costAvg','saleAvg','totalUSD','profitUSD','totalCUP'].forEach(col=>{ worksheet.getColumn(col).numFmt='#,##0.00'; });
@@ -4587,7 +4592,7 @@ async function exportDailySalesExcel() {
         const totalRow = worksheet.addRow({ fecha:'', product:'', category:'TOTALES', quantity:totalQty, totalUSD, profitUSD:totalProfitUSD, totalCUP:totalCUPSum });
         totalRow.font = { bold:true, size:12 };
         totalRow.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFEF3C7' } };
-        worksheet.autoFilter = 'A5:I5';
+        worksheet.autoFilter = 'A5:J5';
         worksheet.views = [{ state:'frozen', ySplit:5 }];
 
     } else {
