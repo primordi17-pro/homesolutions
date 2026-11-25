@@ -3260,6 +3260,7 @@ async function confirmMultiSale() {
             if (qty === 0) continue;
             const product   = productsById[productId];
             if (!product) continue;
+            if(getLocationType((window.__locationCache||[]).find(l=>l.name===product.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
             if (qty > product.quantity) {
                 await appAlert(`Stock insuficiente para "${escHtml(product.brand)}". Disponible: ${product.quantity}.`, 'warning', '⚠️ Sin stock suficiente');
                 return;
@@ -3285,7 +3286,6 @@ async function confirmMultiSale() {
         for (const item of items) {
             const p = await getRecordById('products', item.productId);
             if (!p) continue;
-            if(getLocationType((window.__locationCache||[]).find(l=>l.name===p.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
             const fifo=await consumeStockFIFO(p,item.quantity);
             item.salePrice=fifo.averageSale;item.costPrice=fifo.averageCost;item.lotAllocations=fifo.allocations;
             p.quantity -= item.quantity;
@@ -3328,7 +3328,7 @@ async function openQuickSaleModal(productId) {
     const product = await getRecordById('products', productId);
     if (!product) return;
     if (getLocationType((window.__locationCache||[]).find(l=>l.name===product.location)) === 'Almacén') {
-        await appAlert('Los productos en Almacén central no se pueden vender directamente. Transfiérelo a Tienda primero.','warning','Venta no permitida');
+        await appAlert('Los productos ubicados en almacenes no se pueden vender directamente. Transfiérelos a un punto de venta primero.','warning','Venta no permitida');
         return;
     }
     const fifoQuote=await quoteStockFIFO(product,1),salePrice=fifoQuote.averageSale,displayCost=fifoQuote.averageCost;
@@ -3972,9 +3972,9 @@ async function loadDashboard() {
     const totalProducts=products.reduce((s,p)=>s+p.quantity,0);
     document.getElementById('totalProducts').textContent=totalProducts;
     // Vendedoras ven el valor al precio de venta; admin ve el valor al costo — ambos en USD
-    const totalValueUSD = canViewCost
-        ? roundCUP(products.reduce((s,p)=>roundCUP(s+roundCUP(p.quantity*p.price)),0))
-        : roundCUP(products.reduce((s,p)=>roundCUP(s+roundCUP(p.quantity*(p.salePrice||p.price))),0));
+    let totalValueUSD;
+    if(canViewCost){for(const p of products)await ensureProductLots(p);const lots=await getAllRecords('stockLots');const ids=new Set(products.map(p=>p.id));totalValueUSD=roundCUP(lots.filter(l=>ids.has(l.productId)&&l.location!=='Merma').reduce((sum,l)=>sum+(l.quantityRemaining||0)*(l.unitCost||0),0));}
+    else totalValueUSD=roundCUP(products.reduce((s,p)=>roundCUP(s+roundCUP(p.quantity*(p.salePrice||p.price))),0));
     document.getElementById('totalValue').textContent=`${totalValueUSD.toFixed(2)}`;
     const totalValueHintEl = document.getElementById('totalValueHint');
     if (totalValueHintEl) totalValueHintEl.textContent = `≈ ${roundCUP(totalValueUSD*getExchangeRate()).toFixed(2)} CUP`;
