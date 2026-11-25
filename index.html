@@ -3378,11 +3378,14 @@ function closeQuickSaleModal() { document.getElementById('quickSaleModal').class
 
 async function saveQuickSale(event) {
     event.preventDefault();
+    if(currentRole==='almacenero'){await appAlert('El rol almacenero no puede registrar ventas.','warning','Acceso restringido');return;}
     const productId=parseInt(document.getElementById('quickSaleProductId').value);
     const quantity=parseInt(document.getElementById('quickSaleQuantity').value);
     const notes=document.getElementById('quickSaleNotes').value;
+    if(!Number.isInteger(quantity)||quantity<1){await appAlert('La cantidad debe ser un entero mayor que cero.','warning','Cantidad inválida');return;}
     const product=await getRecordById('products',productId);
     if (!product) { await appAlert('No se pudo encontrar el producto.','error','Error'); return; }
+    if(currentRole!=='admin'&&!accessibleLocationNames.includes(product.location)){await appAlert('No tienes acceso a la locación de este producto.','warning','Acceso restringido');return;}
     if (quantity>product.quantity) { await appAlert(`Stock insuficiente. Disponible: ${product.quantity} en ${product.location}.`,'warning','⚠️ Sin stock'); document.getElementById('quickSaleQuantity').value=product.quantity; return; }
     if(getLocationType((window.__locationCache||[]).find(l=>l.name===product.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
     const fifo=await consumeStockFIFO(product,quantity);
@@ -3880,21 +3883,21 @@ async function undoMovement(movementId) {
     if (!await appConfirm('Se revertirán los cambios de stock.','warning','↩ Deshacer movimiento','Deshacer','Cancelar','danger')) return;
     const items=movement.items||[{productId:movement.productId,quantity:movement.quantity,location:movement.location}];
 
-    // BF-5: detectar si revertir una Entrada o Devolución dejaría stock insuficiente
+    // No permitir revertir entradas cuyas unidades ya fueron consumidas.
+    // Borrar esas capas dejaría ventas históricas apuntando a lotes inexistentes.
     if (movement.type==='Entrada'||movement.type==='Devolución') {
-        const shortages=[];
         for (const item of items) {
             const product=await getRecordById('products',item.productId);
             if (product && product.quantity < item.quantity) {
-                shortages.push(`• ${product.brand} — ${product.color}: hay ${product.quantity} ud., se intenta restar ${item.quantity}`);
+                await appAlert(`No se puede revertir esta entrada: ${product.brand} — ${product.color} tiene ${product.quantity} ud. disponibles y la operación requiere retirar ${item.quantity}. Parte del stock ya fue utilizado.`,'warning','Reversión bloqueada');
+                return;
             }
-        }
-        if (shortages.length>0) {
-            const ok=await appConfirm(
-                `El stock actual es menor que la cantidad a revertir:\n\n${shortages.join('\n')}\n\nSe ajustará a 0 en los productos afectados. ¿Continuar?`,
-                'warning','⚠️ Stock insuficiente para revertir','Continuar de todas formas','Cancelar'
-            );
-            if (!ok) return;
+            const sourceLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.productId===item.productId);
+            const consumed=sourceLots.some(l=>(l.quantityRemaining||0)<(l.originalQuantity||0));
+            if(consumed){
+                await appAlert('No se puede revertir esta entrada porque sus capas FIFO ya fueron consumidas total o parcialmente por movimientos posteriores. Deshaz primero esos movimientos en orden inverso.','warning','Capas FIFO utilizadas');
+                return;
+            }
         }
     }
 
