@@ -1761,6 +1761,7 @@
                         </div>
                         <div id="saleItemsList"></div>
                     </div>
+                    <details id="entryPriceDetails" class="hidden" style="border:1px solid var(--border);border-radius:10px;padding:12px"><summary style="cursor:pointer;font-weight:700;font-size:13px">Editar precios (solo administrador)</summary><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px"><div><label class="form-label">Nuevo precio de compra</label><input type="number" min="0" step="0.01" id="entryCostPrice" class="form-input" placeholder="Mantener actual"></div><div><label class="form-label">Nuevo precio de venta</label><input type="number" min="0.01" step="0.01" id="entrySalePrice" class="form-input" placeholder="Mantener actual"></div></div><p style="font-size:11px;color:var(--text-3);margin-top:8px">Solo afecta las unidades de esta entrada. Las existencias y ventas anteriores conservan sus precios históricos.</p></details>
                     <div id="transferLocationDiv" class="hidden">
                         <label class="form-label">Nueva Ubicación (Destino) *</label>
                         <select id="movementNewLocation" class="form-input form-select">
@@ -1951,6 +1952,7 @@
                         <label class="form-label">Nombre *</label>
                         <input type="text" id="locationName" required class="form-input" placeholder="Ej: Almacén Norte">
                     </div>
+                    <div><label class="form-label">Tipo de locación *</label><select id="locationType" required class="form-input form-select"><option value="Almacén">Almacén</option><option value="Punto de venta">Punto de venta</option></select></div>
                     <div>
                         <label class="form-label">Roles con acceso</label>
                         <p style="font-size:11.5px;color:var(--text-3);margin:0 0 8px">Administrador siempre tiene acceso total; no necesita marcarse.</p>
@@ -2053,24 +2055,24 @@ const ROLES = {
     // La fuente de verdad es el store 'locations', vía locations[].allowedRoles.
     // admin usa canViewAllLocations:true como bypass; el resto se resuelve en refreshAccessibleLocations().
     admin: { sections:['dashboard','products','movements','reports'], movements:['Entrada','Salida','Merma','Transferencia','Devolución'], canViewAllLocations:true, canExport:true, canBackup:true, canEditExchangeRate:true, canDeleteProduct:true, canCreateProduct:true, canQuickSale:true, canViewCost:true, canManageCatalog:true },
-    vendor_tienda: { sections:['products','movements'], movements:['Entrada','Salida','Merma','Devolución'], canViewAllLocations:false, canExport:false, canBackup:true, canEditExchangeRate:true, canDeleteProduct:false, canCreateProduct:true, canQuickSale:true, canViewCost:false, entradaCreateOnly:true, canManageCatalog:false }
+    vendor_tienda: { sections:['products','movements'], movements:['Entrada','Salida','Merma','Devolución'], canViewAllLocations:false, canExport:false, canBackup:true, canEditExchangeRate:true, canDeleteProduct:false, canCreateProduct:true, canQuickSale:true, canViewCost:false, entradaCreateOnly:true, canManageCatalog:false },
+    almacenero: { sections:['products','movements'], movements:['Entrada','Transferencia'], canViewAllLocations:false, canExport:false, canBackup:false, canEditExchangeRate:false, canDeleteProduct:false, canCreateProduct:false, canQuickSale:false, canViewCost:false, entradaCreateOnly:false, canManageCatalog:false, warehouseOnly:true }
 };
 // Etiquetas legibles de rol — usadas en los checkboxes de allowedRoles del modal de locación
-const ROLE_LABELS = { admin: 'Administrador', vendor_tienda: 'Vendedor Tienda' };
+const ROLE_LABELS = { admin: 'Administrador', vendor_tienda: 'Vendedor Tienda', almacenero: 'Almacenero' };
 let currentUser = null, currentRole = null;
 
 // ========== INICIO: ACCESO DINÁMICO A LOCACIONES (route B) ==========
 // Reemplaza a ROLES[rol].locations. Se recalcula al login y cada vez que el store 'locations' cambia.
 let accessibleLocationNames = [];
 
+async function normalizeLocationCatalog(){const ls=await getAllRecords('locations');for(const l of ls){if(!l.type)l.type=l.name==='Tienda'?'Punto de venta':(/almac[eé]n/i.test(l.name)?'Almacén':'Punto de venta');if(l.name==='Tienda'&&(!Array.isArray(l.allowedRoles)||!l.allowedRoles.length))l.allowedRoles=['vendor_tienda'];if(l.name==='Almacén central'&&(!Array.isArray(l.allowedRoles)||l.allowedRoles.includes('vendor_tienda')))l.allowedRoles=['almacenero'];await updateRecord('locations',l);}}
 async function refreshAccessibleLocations() {
     const role = ROLES[currentRole];
     if (!role) { accessibleLocationNames = []; return; }
     const allLocs = await getAllRecords('locations');
     const activeLocs = allLocs.filter(l => l.isActive);
-    accessibleLocationNames = role.canViewAllLocations
-        ? activeLocs.map(l => l.name)
-        : activeLocs.filter(l => Array.isArray(l.allowedRoles) && l.allowedRoles.includes(currentRole)).map(l => l.name);
+    accessibleLocationNames = role.canViewAllLocations ? activeLocs.filter(l=>l.special!=='merma').map(l=>l.name) : activeLocs.filter(l=>Array.isArray(l.allowedRoles)&&l.allowedRoles.includes(currentRole)&&(currentRole!=='almacenero'||getLocationType(l)==='Almacén')&&(currentRole!=='vendor_tienda'||getLocationType(l)!=='Almacén')&&l.special!=='merma').map(l=>l.name);
 }
 // ========== FIN: ACCESO DINÁMICO A LOCACIONES (route B) ==========
 
@@ -2123,6 +2125,7 @@ async function attemptLogin() {
     try {
         await initDatabase();
         await loadAllData();
+        await normalizeLocationCatalog();
         await refreshAccessibleLocations();
         await refreshCatalogSelects();
         applyRoleUI();
@@ -2169,7 +2172,7 @@ function applyLocationFilters() {
         Array.from(movementType.options).forEach(opt => {
             if (!opt.value) return;
             // vendor_tienda: Entrada se hace desde "Nuevo Producto", no desde el modal de movimientos
-            if (currentRole === 'vendor_tienda' && opt.value === 'Entrada') {
+            if ((currentRole === 'vendor_tienda' && opt.value === 'Entrada') || (currentRole === 'almacenero' && !role.movements.includes(opt.value))) {
                 opt.hidden = true;
             } else {
                 opt.hidden = !role.movements.includes(opt.value);
@@ -2293,7 +2296,7 @@ document.addEventListener('keydown', (e) => {
 
 // ══ DATABASE ══
 const DB_NAME = 'TechInventoryLVUSD';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 let db;
 let allProductsCache = [];
 let productsById = {};
@@ -2351,13 +2354,16 @@ function initDatabase() {
                 // Seed: locaciones actuales con allowedRoles fiel al ROLES estático previo
                 // (admin siempre tiene acceso total vía canViewAllLocations — no necesita allowedRoles)
                 const seedLocations = [
-                    { name:'Tienda',          isActive:true, allowedRoles:['vendor_tienda'] },
-                    { name:'Almacén central', isActive:true, allowedRoles:['vendor_tienda'] }
+                    { name:'Tienda', type:'Punto de venta', isActive:true, allowedRoles:['vendor_tienda'] },
+                    { name:'Almacén central', type:'Almacén', isActive:true, allowedRoles:['almacenero'] }
                 ];
                 seedLocations.forEach(loc => locDynStore.add(loc));
             }
             // ========== FIN: STORES V5 — CATEGORIES / LOCATIONS ==========
 
+            // ── v6: capas FIFO por lote ──
+            let createdStockLots = false;
+            if (!db.objectStoreNames.contains('stockLots')) { const lotsStore=db.createObjectStore('stockLots',{keyPath:'id',autoIncrement:true}); lotsStore.createIndex('productId','productId',{unique:false}); lotsStore.createIndex('location','location',{unique:false}); lotsStore.createIndex('createdAt','createdAt',{unique:false}); createdStockLots=true; }
             // ── Migración: poblar costHistory desde productos existentes ──
             const migrateTS = Date.now();
             const productsStore = tx.objectStore('products');
@@ -2366,6 +2372,7 @@ function initDatabase() {
             getAllReq.onsuccess = () => {
                 const existingProducts = getAllReq.result || [];
                 existingProducts.forEach(p => {
+                    if (createdStockLots && p.quantity>0) tx.objectStore('stockLots').add({productId:p.id,location:p.location,quantityRemaining:p.quantity,originalQuantity:p.quantity,unitCost:roundCUP(p.price||0),unitSale:roundCUP(p.salePrice||p.price||0),createdAt:p.dateAdded||migrateTS,migrated:true});
                     const cost = roundCUP(p.price || 0);
                     const sale = roundCUP(p.salePrice || p.price || 0);
                     const margin = roundCUP(sale - cost);
@@ -2387,6 +2394,13 @@ function initDatabase() {
     });
 }
 function addRecord(storeName, data) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readwrite'); const s=tx.objectStore(storeName); const r=s.add(data); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function getLocationType(loc){return loc?.type||(/almac[eé]n/i.test(loc?.name||'')?'Almacén':'Punto de venta');}
+async function ensureMermaLocation(){const ls=await getAllRecords('locations');let l=ls.find(x=>x.special==='merma'||x.name==='Merma');if(!l){const id=await addRecord('locations',{name:'Merma',type:'Merma',special:'merma',isActive:true,allowedRoles:[]});l=await getRecordById('locations',id);}return l;}
+async function ensureProductLots(p){if(!p||p.quantity<=0)return[];let ls=(await getAllRecords('stockLots')).filter(l=>l.productId===p.id&&l.location===p.location&&l.quantityRemaining>0);const total=ls.reduce((n,l)=>n+l.quantityRemaining,0);if(total<p.quantity)await addRecord('stockLots',{productId:p.id,location:p.location,quantityRemaining:p.quantity-total,originalQuantity:p.quantity-total,unitCost:roundCUP(p.price||0),unitSale:roundCUP(p.salePrice||p.price||0),createdAt:p.dateAdded||Date.now(),migrated:true});return(await getAllRecords('stockLots')).filter(l=>l.productId===p.id&&l.location===p.location&&l.quantityRemaining>0);}
+async function consumeStockFIFO(p,q){const ls=await ensureProductLots(p);ls.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||(a.id||0)-(b.id||0));let left=q,cost=0,sale=0;const allocations=[];for(const l of ls){if(left<=0)break;const take=Math.min(left,l.quantityRemaining);l.quantityRemaining-=take;await updateRecord('stockLots',l);allocations.push({lotId:l.id,quantity:take,unitCost:l.unitCost||0,unitSale:l.unitSale||0,createdAt:l.createdAt||Date.now()});cost+=take*(l.unitCost||0);sale+=take*(l.unitSale||0);left-=take;}if(left>0){allocations.push({lotId:null,quantity:left,unitCost:p.price||0,unitSale:p.salePrice||p.price||0,createdAt:Date.now(),fallback:true});cost+=left*(p.price||0);sale+=left*(p.salePrice||p.price||0);}return{allocations,averageCost:roundCUP(cost/q),averageSale:roundCUP(sale/q)};}
+async function addStockLot(pid,loc,q,cost,sale,date=Date.now(),movementId=null){if(q>0)return addRecord('stockLots',{productId:pid,location:loc,quantityRemaining:q,originalQuantity:q,unitCost:roundCUP(cost||0),unitSale:roundCUP(sale||0),createdAt:date,movementId});}
+async function restoreStockAllocations(pid,loc,allocs){for(const a of allocs||[]){if(a.lotId){const l=await getRecordById('stockLots',a.lotId);if(l){l.quantityRemaining+=a.quantity;await updateRecord('stockLots',l);continue;}}await addStockLot(pid,loc,a.quantity,a.unitCost,a.unitSale,a.createdAt||Date.now());}}
+
 function updateRecord(storeName, data) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readwrite'); const s=tx.objectStore(storeName); const r=s.put(data); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 function deleteRecord(storeName, id) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readwrite'); const s=tx.objectStore(storeName); const r=s.delete(id); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
 function getAllRecords(storeName) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readonly'); const s=tx.objectStore(storeName); const r=s.getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
@@ -2421,7 +2435,8 @@ async function populateLocationSelect(selectId) {
     const placeholder = sel.querySelector('option[value=""]');
     const placeholderHtml = placeholder ? placeholder.outerHTML : '<option value="">Seleccionar…</option>';
     sel.innerHTML = placeholderHtml;
-    const active = locs.filter(l => l.isActive !== false).sort((a,b) => a.name.localeCompare(b.name));
+    window.__locationCache=locs;
+    const active = locs.filter(l => l.isActive !== false && l.special!=='merma' && l.name!=='Merma').sort((a,b) => a.name.localeCompare(b.name));
     active.forEach(l => {
         const opt = document.createElement('option');
         opt.value = l.name; opt.textContent = l.name;
@@ -2566,6 +2581,7 @@ async function loadLocationsTable() {
     locs.sort((a,b) => a.name.localeCompare(b.name));
     for (const l of locs) {
         const active = l.isActive !== false;
+        if(l.special==='merma'||l.name==='Merma') continue;
         const roles  = Array.isArray(l.allowedRoles) ? l.allowedRoles : [];
         const rolesLabel = roles.length
             ? roles.map(r => ROLE_LABELS[r] || r).join(', ')
@@ -2603,6 +2619,7 @@ function openLocationModal(locId = null) {
             if (l) {
                 document.getElementById('locationId').value = l.id;
                 document.getElementById('locationName').value = l.name;
+                document.getElementById('locationType').value = getLocationType(l);
                 const allowed = Array.isArray(l.allowedRoles) ? l.allowedRoles : [];
                 document.querySelectorAll('.location-role-checkbox').forEach(cb => {
                     cb.checked = allowed.includes(cb.value);
@@ -2620,12 +2637,13 @@ async function saveLocation(event) {
     const name  = document.getElementById('locationName').value.trim();
     if (!name) return;
     const allowedRoles = Array.from(document.querySelectorAll('.location-role-checkbox:checked')).map(cb => cb.value);
+    const type = document.getElementById('locationType').value;
     if (locId) {
         const existing = await getRecordById('locations', parseInt(locId));
-        if (existing) { Object.assign(existing, { name, allowedRoles }); await updateRecord('locations', existing); }
+        if (existing) { Object.assign(existing, { name, type, allowedRoles }); await updateRecord('locations', existing); }
         showToast('Locación actualizada.', 'success', 'Guardado');
     } else {
-        await addRecord('locations', { name, allowedRoles, isActive: true });
+        await addRecord('locations', { name, type, allowedRoles, isActive: true });
         showToast('Locación creada.', 'success', 'Guardado');
     }
     closeLocationModal();
@@ -3362,11 +3380,12 @@ async function saveQuickSale(event) {
     const product=await getRecordById('products',productId);
     if (!product) { await appAlert('No se pudo encontrar el producto.','error','Error'); return; }
     if (quantity>product.quantity) { await appAlert(`Stock insuficiente. Disponible: ${product.quantity} en ${product.location}.`,'warning','⚠️ Sin stock'); document.getElementById('quickSaleQuantity').value=product.quantity; return; }
-    const frozenCostPrice=roundCUP(product.price);
-    const frozenSalePrice=roundCUP(product.salePrice||product.price);
+    const fifo=await consumeStockFIFO(product,quantity);
+    const frozenCostPrice=fifo.averageCost;
+    const frozenSalePrice=fifo.averageSale||roundCUP(product.salePrice||product.price);
     product.quantity-=quantity;
     await updateRecord('products',product);
-    await addRecord('movements',{ type:'Salida', items:[{productId,quantity,salePrice:frozenSalePrice,costPrice:frozenCostPrice,location:product.location}], sourceLocation:product.location, notes:notes||'Venta rápida', date:Date.now(), undone:false, registeredBy:currentUser||'Admin', exchangeRateUsed:getExchangeRate() });
+    await addRecord('movements',{ type:'Salida', items:[{productId,quantity,salePrice:frozenSalePrice,costPrice:frozenCostPrice,location:product.location,lotAllocations:fifo.allocations}], sourceLocation:product.location, notes:notes||'Venta rápida', date:Date.now(), undone:false, registeredBy:currentUser||'Admin', exchangeRateUsed:getExchangeRate() });
     stampLastModified();
     showToast('La venta fue registrada correctamente.','success','💰 Venta completada');
     closeQuickSaleModal(); loadMovements(); loadProducts(); loadDashboard();
@@ -3427,10 +3446,13 @@ function filterProductDropdown(idx, forcedLocation=null) {
     const alreadySelected=getSelectedProductIds(idx);
     const filtered=allProductsCache.filter(p=>{
         const matchLoc=!filterLoc||p.location===filterLoc;
-        const matchSaleLoc=movType!=='Salida'||p.location!=='Almacén central';
+        const locType=getLocationType((window.__locationCache||[]).find(l=>l.name===p.location));
+        const matchSaleLoc=movType!=='Salida'||locType!=='Almacén';
+        const matchRoleLoc=currentRole!=='almacenero'||locType==='Almacén';
+        const matchNotMerma=p.location!=='Merma';
         const matchQuery=!query||p.brand.toLowerCase().includes(query)||p.color.toLowerCase().includes(query)||p.category.toLowerCase().includes(query)||p.location.toLowerCase().includes(query);
         const notDuplicate=!alreadySelected.has(p.id);
-        return matchLoc&&matchSaleLoc&&matchQuery&&notDuplicate;
+        return matchLoc&&matchSaleLoc&&matchRoleLoc&&matchNotMerma&&matchQuery&&notDuplicate;
     });
     dropdown.innerHTML='';
     if (filtered.length===0) { dropdown.innerHTML='<div class="product-option no-results">No se encontraron productos</div>'; }
@@ -3621,6 +3643,7 @@ async function openMovementModal() {
     saleItemsCount=0;
     document.getElementById('sourceLocationDiv').classList.add('hidden');
     document.getElementById('transferLocationDiv').classList.add('hidden');
+    document.getElementById('entryPriceDetails').classList.add('hidden'); document.getElementById('entryCostPrice').value=''; document.getElementById('entrySalePrice').value='';
     applyLocationFilters();
     addSaleItem();
     document.getElementById('movementModal').classList.add('active');
@@ -3640,6 +3663,7 @@ function handleMovementTypeChange() {
     document.getElementById('transferLocationDiv').classList.toggle('hidden',type!=='Transferencia');
     document.getElementById('movementNewLocation').required=(type==='Transferencia');
     document.getElementById('sourceLocationDiv').classList.toggle('hidden',!(type==='Salida'||type==='Merma'));
+    document.getElementById('entryPriceDetails').classList.toggle('hidden',!(type==='Entrada'&&currentRole==='admin'));
     const filterLoc=document.getElementById('movementSourceLocation').value;
     document.getElementById('saleItemsList').innerHTML=''; saleItemsCount=0; addSaleItem(filterLoc);
 }
@@ -3690,6 +3714,10 @@ async function saveMovement(event) {
     // eliminando la race condition por lecturas stale dentro del loop.
     const sharedDate = Date.now();
     const newLocation = document.getElementById('movementNewLocation').value;
+    if(type==='Merma') await ensureMermaLocation();
+    const costRaw=document.getElementById('entryCostPrice')?.value, saleRaw=document.getElementById('entrySalePrice')?.value;
+    const entryCost=currentRole==='admin'&&costRaw!==''?parseFloat(costRaw):null, entrySale=currentRole==='admin'&&saleRaw!==''?parseFloat(saleRaw):null;
+    if(type==='Entrada'&&((entryCost!==null&&(!Number.isFinite(entryCost)||entryCost<0))||(entrySale!==null&&(!Number.isFinite(entrySale)||entrySale<=0)))){await appAlert('Verifica los precios nuevos.','warning','Precio inválido');return;}
     const allProdsSnapshot = await getAllRecords('products');
     const productsMap = new Map(allProdsSnapshot.map(p => [p.id, {...p}]));
 
@@ -3707,6 +3735,7 @@ async function saveMovement(event) {
 
         if (type==='Entrada'||type==='Devolución') {
             prodInMap.quantity += quantity;
+            if(type==='Entrada'&&currentRole==='admin'){if(entryCost!==null){prodInMap.price=entryCost;prodInMap.costPending=entryCost===0;}if(entrySale!==null)prodInMap.salePrice=entrySale;if(prodInMap.price>0){prodInMap.margin=roundCUP(prodInMap.salePrice-prodInMap.price);prodInMap.marginPct=roundCUP(prodInMap.margin/prodInMap.price*100);}}
         } else if (type==='Salida'||type==='Merma') {
             prodInMap.quantity -= quantity;
         } else if (type==='Transferencia') {
@@ -3774,11 +3803,15 @@ async function saveMovement(event) {
             ? (tempIdMap.get(mov.destProductId) ?? null)
             : mov.destProductId;
 
+        const fifo=(type==='Salida'||type==='Merma'||type==='Transferencia')?await consumeStockFIFO(mov.product,mov.quantity):null;
+        const entryUnitCost=entryCost!==null?entryCost:mov.product.price;
+        const entryUnitSale=entrySale!==null?entrySale:(mov.product.salePrice||mov.product.price);
+        const unitCost=fifo?fifo.averageCost:entryUnitCost, unitSale=fifo?fifo.averageSale:entryUnitSale;
         const movId = await addRecord('movements', {
             type,
-            items: [{ productId: mov.productId, quantity: mov.quantity, salePrice: mov.frozenSale,
-                      costPrice: mov.frozenCost, location: mov.itemLocation,
-                      destProductId: realDestId, destLocation: mov.destLocation }],
+            items: [{ productId: mov.productId, quantity: mov.quantity, salePrice: roundCUP(unitSale||0),
+                      costPrice: roundCUP(unitCost||0), location: mov.itemLocation,
+                      destProductId: realDestId, destLocation: type==='Merma'?'Merma':mov.destLocation, lotAllocations:fifo?.allocations||[] }],
             sourceLocation: sourceLocation || mov.itemLocation || '',
             notes,
             date: sharedDate,
@@ -3788,12 +3821,13 @@ async function saveMovement(event) {
         });
 
         if (type === 'Entrada') {
-            const margin    = roundCUP((mov.product.salePrice || mov.product.price) - mov.frozenCost);
+            await addStockLot(mov.productId,mov.itemLocation,mov.quantity,entryUnitCost,entryUnitSale,sharedDate,movId);
+            const margin    = roundCUP(entryUnitSale-entryUnitCost);
             const marginPct = mov.frozenCost > 0 ? roundCUP((margin / mov.frozenCost) * 100) : 0;
             await addRecord('costHistory', {
                 productId:    mov.productId,
-                costPrice:    mov.frozenCost,
-                salePrice:    roundCUP(mov.product.salePrice || mov.product.price),
+                costPrice:    roundCUP(entryUnitCost),
+                salePrice:    roundCUP(entryUnitSale),
                 margin, marginPct,
                 exchangeRate: getExchangeRate(),
                 date:         sharedDate,
@@ -3904,7 +3938,7 @@ async function undoMovement(movementId) {
     for (const item of items) {
         const product=await getRecordById('products',item.productId);
         if (!product) continue;
-        if (movement.type==='Salida'||movement.type==='Merma') { product.quantity+=item.quantity; }
+        if (movement.type==='Salida'||movement.type==='Merma') { product.quantity+=item.quantity; await restoreStockAllocations(item.productId,item.location||product.location,item.lotAllocations||[]); }
         else if (movement.type==='Entrada'||movement.type==='Devolución') { product.quantity=Math.max(0,product.quantity-item.quantity); }
         await updateRecord('products',product);
     }
@@ -3917,7 +3951,7 @@ async function undoMovement(movementId) {
 
 // ── DASHBOARD ──
 async function loadDashboard() {
-    const products=await getAllRecords('products');
+    const products=(await getAllRecords('products')).filter(p=>p.location!=='Merma');
     const movements=await getAllRecords('movements');
     const canViewCost = ROLES[currentRole].canViewCost;
     const totalProducts=products.reduce((s,p)=>s+p.quantity,0);
@@ -4705,6 +4739,7 @@ function debounce(fn, delay) {
 // ══ BACKUP ══
 async function exportBackupJSON() {
     const products=await getAllRecords('products'); const movements=await getAllRecords('movements');
+    const stockLots=await getAllRecords('stockLots');
     const costHistory=await getAllRecords('costHistory');
     const categories=await getAllRecords('categories');
     const locations=await getAllRecords('locations');
@@ -4712,7 +4747,7 @@ async function exportBackupJSON() {
         version:1, backupVersion:5,
         exportedAt:new Date().toISOString(),
         exchangeRate:getExchangeRate(),
-        products, movements,
+        products, movements, stockLots,
         costHistory,
         categories, locations
     };
@@ -4753,6 +4788,7 @@ async function importBackupJSON(event) {
 
 async function mergeBackup(backup, currentProducts, currentMovements, conflicts) {
     const currentCostHist = await getAllRecords('costHistory');
+    const currentStockLots = await getAllRecords('stockLots');
     const currentCategories = await getAllRecords('categories');
     const currentLocations  = await getAllRecords('locations');
 
@@ -4786,7 +4822,7 @@ async function mergeBackup(backup, currentProducts, currentMovements, conflicts)
         exportedAt:new Date().toISOString(),
         exchangeRate:getExchangeRate(),
         products:currentProducts, movements:currentMovements,
-        costHistory:currentCostHist,
+        costHistory:currentCostHist, stockLots:currentStockLots,
         categories:currentCategories, locations:currentLocations,
         note:'Backup de seguridad automático antes de fusión'
     };
@@ -4816,7 +4852,9 @@ async function mergeBackup(backup, currentProducts, currentMovements, conflicts)
     mergedMovements.push(...newMovsToAdd);
 
     // Merge stores v4 — solo si existen en el backup (compatibilidad con v3)
-    const backupCostHist    = backup.costHistory        || [];
+    const backupCostHist=backup.costHistory||[], backupStockLots=backup.stockLots||[];
+    const currentStockLotIds=new Set(currentStockLots.map(l=>l.id));
+    const mergedStockLots=[...currentStockLots,...backupStockLots.filter(l=>!currentStockLotIds.has(l.id))];
     const currentCostHistIds= new Set(currentCostHist.map(h=>h.id));
     const mergedCostHist    = [...currentCostHist,    ...backupCostHist.filter(h=>!currentCostHistIds.has(h.id))];
 
@@ -4831,12 +4869,13 @@ async function mergeBackup(backup, currentProducts, currentMovements, conflicts)
     const mergedLocations   = [...currentLocations,  ...backupLocations.filter(l=>!currentLocIds.has(l.id))];
 
     // Limpiar y reescribir todos los stores
-    const storeNames = ['products','movements','costHistory','categories','locations'];
+    const storeNames = ['products','movements','costHistory','categories','locations','stockLots'];
     const txW = db.transaction(storeNames,'readwrite');
     await Promise.all(storeNames.map(s=>new Promise(r=>{txW.objectStore(s).clear().onsuccess=r;})));
     for (const p of mergedProducts)  await addRecord('products',p);
     for (const m of mergedMovements) await addRecord('movements',m);
     for (const h of mergedCostHist)  await addRecord('costHistory',h);
+    for (const l of mergedStockLots) await addRecord('stockLots',l);
     for (const c of mergedCategories) await addRecord('categories',c);
     for (const l of mergedLocations)  await addRecord('locations',l);
 
@@ -4855,7 +4894,7 @@ async function replaceWithBackup(backup) {
     // realmente los trae. Un backup v4 no los tiene: si los limpiáramos igual, el catálogo
     // de categorías/locaciones quedaría vacío sin forma de recuperarlo — se preserva intacto.
     const hasCatalogInBackup = Array.isArray(backup.categories) && Array.isArray(backup.locations);
-    const storeNames = ['products','movements','costHistory'];
+    const storeNames = ['products','movements','costHistory','stockLots'];
     if (hasCatalogInBackup) storeNames.push('categories','locations');
 
     const txW = db.transaction(storeNames,'readwrite');
@@ -4864,6 +4903,7 @@ async function replaceWithBackup(backup) {
     for (const m of backup.movements) await addRecord('movements',m);
     const backupCostHist = backup.costHistory        || [];
     for (const h of backupCostHist)  await addRecord('costHistory',h);
+    for (const l of (backup.stockLots||[])) await addRecord('stockLots',l);
     if (hasCatalogInBackup) {
         for (const c of backup.categories) await addRecord('categories',c);
         for (const l of backup.locations)  await addRecord('locations',l);
