@@ -21,7 +21,7 @@ jobs:
           const fs = require('node:fs');
           const assert = require('node:assert/strict');
           const html = fs.readFileSync('index.html', 'utf8');
-          const scripts = [...html.matchAll(/<script\\b[^>]*>([\\s\\S]*?)<\\/script>/gi)]
+          const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
             .map(match => match[1])
             .filter(source => source.trim().length > 0);
           assert.ok(scripts.length > 0, 'No inline JavaScript blocks found in index.html');
@@ -34,8 +34,8 @@ jobs:
             }
           }
           assert.match(html, /async function consumeStockFIFO/);
-          assert.match(html, /if\\(available<q\\)/);
-          assert.match(html, /!ROLES\\[currentRole\\]\\.movements\\.includes\\(type\\)/);
+          assert.match(html, /if\(available<q\)/);
+          assert.match(html, /!ROLES\[currentRole\]\.movements\.includes\(type\)/);
           assert.match(html, /Capas FIFO utilizadas/);
           console.log('Inline JavaScript parsed and critical inventory guards found.');
           NODE
