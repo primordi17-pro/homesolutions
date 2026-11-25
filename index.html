@@ -3456,7 +3456,7 @@ function filterProductDropdown(idx, forcedLocation=null) {
         const matchLoc=!filterLoc||p.location===filterLoc;
         const locType=getLocationType((window.__locationCache||[]).find(l=>l.name===p.location));
         const matchSaleLoc=movType!=='Salida'||locType!=='Almacén';
-        const matchRoleLoc=currentRole!=='almacenero'||locType==='Almacén';
+        const matchRoleLoc=currentRole==='admin'||accessibleLocationNames.includes(p.location);
         const matchNotMerma=p.location!=='Merma';
         const matchQuery=!query||p.brand.toLowerCase().includes(query)||p.color.toLowerCase().includes(query)||p.category.toLowerCase().includes(query)||p.location.toLowerCase().includes(query);
         const notDuplicate=!alreadySelected.has(p.id);
@@ -3709,7 +3709,7 @@ async function saveMovement(event) {
         const sourceLoc=(window.__locationCache||[]).find(l=>l.name===product.location);
         if(currentRole==='almacenero'&&getLocationType(sourceLoc)!=='Almacén'){await appAlert('El almacenero solo puede operar con productos ubicados en almacenes.','warning','Acceso restringido');return;}
         if(type==='Salida'&&getLocationType(sourceLoc)==='Almacén'){await appAlert('No se puede vender desde un almacén. Transfiere el producto a un punto de venta.','warning','Locación no vendible');return;}
-        if(currentRole!=='admin'&&currentRole!=='almacenero'&&!accessibleLocationNames.includes(product.location)){await appAlert('No tienes acceso a la locación de este producto.','warning','Acceso restringido');return;}
+        if(currentRole!=='admin'&&!accessibleLocationNames.includes(product.location)){await appAlert('No tienes acceso a la locación de este producto.','warning','Acceso restringido');return;}
         if ((type==='Salida'||type==='Merma'||type==='Transferencia')&&quantity>product.quantity) {
             await appAlert(`Stock insuficiente para "${product.brand}".\nDisponible: ${product.quantity} · Solicitado: ${quantity}`,'warning','⚠️ Stock insuficiente'); return;
         }
