@@ -2076,7 +2076,7 @@ async function refreshAccessibleLocations() {
     if (!role) { accessibleLocationNames = []; return; }
     const allLocs = await getAllRecords('locations');
     const activeLocs = allLocs.filter(l => l.isActive);
-    accessibleLocationNames = role.canViewAllLocations ? activeLocs.filter(l=>l.special!=='merma').map(l=>l.name) : activeLocs.filter(l=>Array.isArray(l.allowedRoles)&&l.allowedRoles.includes(currentRole)&&(currentRole!=='almacenero'||getLocationType(l)==='Almacén')&&(currentRole!=='vendor_tienda'||getLocationType(l)!=='Almacén')&&l.special!=='merma').map(l=>l.name);
+    accessibleLocationNames = role.canViewAllLocations ? activeLocs.filter(l=>l.special!=='merma').map(l=>l.name) : activeLocs.filter(l=>Array.isArray(l.allowedRoles)&&l.allowedRoles.includes(currentRole)&&(currentRole!=='almacenero'||getLocationType(l)==='Almacén')&&l.special!=='merma').map(l=>l.name);
 }
 // ========== FIN: ACCESO DINÁMICO A LOCACIONES (route B) ==========
 
@@ -3334,7 +3334,7 @@ async function openQuickSaleModal(productId) {
     const fifoQuote=await quoteStockFIFO(product,1),salePrice=fifoQuote.averageSale,displayCost=fifoQuote.averageCost;
     const profit=salePrice-displayCost;
     const canViewCost = ROLES[currentRole].canViewCost;
-    const isPending = product.costPending || !displayCost;
+    const isPending = !displayCost;
     document.getElementById('quickSaleProductId').value = productId;
     document.getElementById('quickSaleProductName').textContent = `${product.brand} — ${product.color} · ${product.category}`;
     document.getElementById('quickSaleStock').textContent = product.quantity;
