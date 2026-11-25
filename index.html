@@ -1294,6 +1294,7 @@
                 <span class="nav-icon">🔄</span>
                 <span class="sidebar-label">Movimientos</span>
             </a>
+            <a href="#" class="sidebar-link" data-section="mermas" data-tooltip="Mermas"><span class="nav-icon">⚠️</span><span class="sidebar-label">Mermas</span></a>
             <a href="#" class="sidebar-link" data-section="reports" data-tooltip="Reportes">
                 <span class="nav-icon">📈</span>
                 <span class="sidebar-label">Reportes y Ventas</span>
@@ -1537,6 +1538,8 @@
             </div>
         </section>
 
+        <!-- ── REGISTRO DE MERMAS ── -->
+        <section id="mermas" class="hidden"><div class="page-header"><div><h2 class="page-title">Registro de Mermas</h2><p class="page-subtitle">Todas las pérdidas y bajas de inventario registradas</p></div><button class="btn-secondary" onclick="loadMermas()">↻ Actualizar</button></div><div class="card" style="overflow:hidden"><div class="table-container"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Locación de origen</th><th>Registrado por</th><th>Notas</th><th>Costo estimado</th></tr></thead><tbody id="mermasTableBody"></tbody></table></div></div></section>
         <!-- ── SUPERVISIÓN ── -->
         <!-- ── REPORTES ── -->
         <section id="reports" class="hidden">
@@ -1929,7 +1932,7 @@
             </div>
             <div class="table-container">
                 <table>
-                    <thead><tr><th>Nombre</th><th>Roles con acceso</th><th>Estado</th><th>Acciones</th></tr></thead>
+                    <thead><tr><th>Nombre</th><th>Tipo</th><th>Roles con acceso</th><th>Estado</th><th>Acciones</th></tr></thead>
                     <tbody id="locationsTableBody"></tbody>
                 </table>
             </div>
@@ -2054,7 +2057,7 @@ const ROLES = {
     // NOTA (route B, Sprint U1): "locations" ya NO vive aquí — se quitó el array estático.
     // La fuente de verdad es el store 'locations', vía locations[].allowedRoles.
     // admin usa canViewAllLocations:true como bypass; el resto se resuelve en refreshAccessibleLocations().
-    admin: { sections:['dashboard','products','movements','reports'], movements:['Entrada','Salida','Merma','Transferencia','Devolución'], canViewAllLocations:true, canExport:true, canBackup:true, canEditExchangeRate:true, canDeleteProduct:true, canCreateProduct:true, canQuickSale:true, canViewCost:true, canManageCatalog:true },
+    admin: { sections:['dashboard','products','movements','mermas','reports'], movements:['Entrada','Salida','Merma','Transferencia','Devolución'], canViewAllLocations:true, canExport:true, canBackup:true, canEditExchangeRate:true, canDeleteProduct:true, canCreateProduct:true, canQuickSale:true, canViewCost:true, canManageCatalog:true },
     vendor_tienda: { sections:['products','movements'], movements:['Entrada','Salida','Merma','Devolución'], canViewAllLocations:false, canExport:false, canBackup:true, canEditExchangeRate:true, canDeleteProduct:false, canCreateProduct:true, canQuickSale:true, canViewCost:false, entradaCreateOnly:true, canManageCatalog:false },
     almacenero: { sections:['products','movements'], movements:['Entrada','Transferencia'], canViewAllLocations:false, canExport:false, canBackup:false, canEditExchangeRate:false, canDeleteProduct:false, canCreateProduct:false, canQuickSale:false, canViewCost:false, entradaCreateOnly:false, canManageCatalog:false, warehouseOnly:true }
 };
@@ -2195,10 +2198,8 @@ function applyLocationFilters() {
     // Filtro de ubicación destino en transferencias
     const movementNewLocation = document.getElementById('movementNewLocation');
     if (movementNewLocation) {
-        Array.from(movementNewLocation.options).forEach(opt => {
-            if (!opt.value) return;
-            opt.hidden = !accessibleLocationNames.includes(opt.value);
-        });
+        const allLocs=window.__locationCache||[];
+        Array.from(movementNewLocation.options).forEach(opt => { if (!opt.value) return; opt.hidden=currentRole==='almacenero'?!allLocs.some(l=>l.name===opt.value&&l.isActive!==false&&l.special!=='merma'):!accessibleLocationNames.includes(opt.value); });
     }
 
     // Columnas precio venta y ganancia — solo admin las ve
@@ -2589,6 +2590,7 @@ async function loadLocationsTable() {
         tbody.innerHTML += `
             <tr>
                 <td style="font-weight:600">${escHtml(l.name)}</td>
+                <td style="font-size:12.5px">${escHtml(getLocationType(l))}</td>
                 <td style="font-size:12.5px">${rolesLabel}</td>
                 <td>${active ? '<span class="badge badge-success">Activa</span>' : '<span class="badge" style="background:#F3F4F6;color:#9CA3AF">Inactiva</span>'}</td>
                 <td>
@@ -2684,12 +2686,13 @@ function showSection(sectionId) {
     if (sectionId === 'dashboard')   loadDashboard();
     if (sectionId === 'products')    loadProducts();
     if (sectionId === 'movements')   loadMovements();
+    if (sectionId === 'mermas')       loadMermas();
     if (sectionId === 'reports')     loadDailySalesReport();
     // ── Móvil: cerrar drawer y actualizar label topbar ──
     if (window.innerWidth <= 768) closeMobileSidebar();
     var mobileLabel = document.getElementById('mobileCurrentSection');
     if (mobileLabel) {
-        var labels = { dashboard:'Dashboard', products:'Productos', movements:'Movimientos', reports:'Reportes' };
+        var labels = { dashboard:'Dashboard', products:'Productos', movements:'Movimientos', mermas:'Mermas', reports:'Reportes' };
         mobileLabel.textContent = labels[sectionId] || sectionId;
     }
 }
@@ -2959,7 +2962,8 @@ async function saveProduct(event) {
         costPending = true;
     }
 
-    const salePrice = salePriceRaw;
+    let salePrice = salePriceRaw;
+    if (productId && !role.canViewCost) { const prior=await getRecordById('products',parseInt(productId)); if(prior) salePrice=prior.salePrice||prior.price; }
     if (!salePrice||salePrice<=0) { await appAlert('El precio de venta no puede ser cero o negativo.','warning','⚠️ Precio inválido'); return; }
     if (role.canViewCost && price > 0 && salePrice<price) { if (!await appConfirm(`Precio de venta (${salePrice.toFixed(2)}) menor que compra (${price.toFixed(2)}). ¿Es intencional?`,'warning','⚠️ Venta a pérdida','Sí, es intencional','Cancelar')) return; }
     if (quantity===0) { if (!await appConfirm('El producto se registrará sin stock. ¿Continuar?','warning','⚠️ Cantidad cero','Continuar','Cancelar')) return; }
@@ -3383,6 +3387,7 @@ async function saveQuickSale(event) {
     const fifo=await consumeStockFIFO(product,quantity);
     const frozenCostPrice=fifo.averageCost;
     const frozenSalePrice=fifo.averageSale||roundCUP(product.salePrice||product.price);
+    if(getLocationType((window.__locationCache||[]).find(l=>l.name===product.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
     product.quantity-=quantity;
     await updateRecord('products',product);
     await addRecord('movements',{ type:'Salida', items:[{productId,quantity,salePrice:frozenSalePrice,costPrice:frozenCostPrice,location:product.location,lotAllocations:fifo.allocations}], sourceLocation:product.location, notes:notes||'Venta rápida', date:Date.now(), undone:false, registeredBy:currentUser||'Admin', exchangeRateUsed:getExchangeRate() });
@@ -3541,6 +3546,8 @@ async function loadMovements() {
     applyMovementFilters();
 }
 
+async function loadMermas(){const body=document.getElementById('mermasTableBody');if(!body)return;const ms=(await getAllRecords('movements')).filter(m=>m.type==='Merma'&&!m.undone).sort((a,b)=>b.date-a.date);body.innerHTML='';if(!ms.length){body.innerHTML='<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-3)">Todavía no hay mermas registradas.</td></tr>';return;}const ps=await getAllRecords('products'),byId=new Map(ps.map(p=>[p.id,p]));for(const m of ms){const it=(m.items||[])[0]||{},p=byId.get(it.productId),name=p?`${p.brand} — ${p.color}`:(it.archivedName||'Producto eliminado'),cost=roundCUP((it.costPrice||0)*(it.quantity||0));body.innerHTML+=`<tr><td>${new Date(m.date).toLocaleString('es-ES')}</td><td>${escHtml(name)}</td><td style="font-weight:700">${it.quantity||0}</td><td>${escHtml(it.location||m.sourceLocation||'—')}</td><td>${escHtml(m.registeredBy||'—')}</td><td>${escHtml(m.notes||'—')}</td><td class="mono">${cost.toFixed(2)}</td></tr>`;}}
+
 function toggleMovSort() {
     movSortAsc = !movSortAsc;
     const arrow = document.getElementById('movSortArrow');
@@ -3695,6 +3702,10 @@ async function saveMovement(event) {
         if (!quantity||quantity<1) { await appAlert('La cantidad debe ser mayor que cero.','warning','⚠️ Cantidad inválida'); return; }
         const product=await getRecordById('products',productId);
         if (!product) { await appAlert('No se pudo encontrar el producto.','error','Error'); return; }
+        const sourceLoc=(window.__locationCache||[]).find(l=>l.name===product.location);
+        if(currentRole==='almacenero'&&getLocationType(sourceLoc)!=='Almacén'){await appAlert('El almacenero solo puede operar con productos ubicados en almacenes.','warning','Acceso restringido');return;}
+        if(type==='Salida'&&getLocationType(sourceLoc)==='Almacén'){await appAlert('No se puede vender desde un almacén. Transfiere el producto a un punto de venta.','warning','Locación no vendible');return;}
+        if(currentRole!=='admin'&&currentRole!=='almacenero'&&!accessibleLocationNames.includes(product.location)){await appAlert('No tienes acceso a la locación de este producto.','warning','Acceso restringido');return;}
         if ((type==='Salida'||type==='Merma'||type==='Transferencia')&&quantity>product.quantity) {
             await appAlert(`Stock insuficiente para "${product.brand}".\nDisponible: ${product.quantity} · Solicitado: ${quantity}`,'warning','⚠️ Stock insuficiente'); return;
         }
@@ -3742,9 +3753,7 @@ async function saveMovement(event) {
             prodInMap.quantity -= quantity;
 
             // BF-4: si transfiere todo, marcar origen para eliminar
-            if (prodInMap.quantity <= 0) {
-                prodIdsToDelete.push(productId);
-            }
+            // Conservar el registro con stock cero para poder deshacer transferencias y mantener la identidad del artículo.
 
             // Buscar destino en el snapshot (no en la DB en vivo)
             const destProd = allProdsSnapshot.find(p =>
@@ -3820,10 +3829,11 @@ async function saveMovement(event) {
             exchangeRateUsed: type === 'Salida' ? getExchangeRate() : null
         });
 
-        if (type === 'Entrada') {
+        if (type === 'Transferencia' && fifo && realDestId && mov.destLocation) { for(const allocation of fifo.allocations) await addStockLot(realDestId,mov.destLocation,allocation.quantity,allocation.unitCost,allocation.unitSale,allocation.createdAt||sharedDate,movId); }
+        if (type === 'Entrada' || type === 'Devolución') {
             await addStockLot(mov.productId,mov.itemLocation,mov.quantity,entryUnitCost,entryUnitSale,sharedDate,movId);
             const margin    = roundCUP(entryUnitSale-entryUnitCost);
-            const marginPct = mov.frozenCost > 0 ? roundCUP((margin / mov.frozenCost) * 100) : 0;
+            const marginPct = entryUnitCost > 0 ? roundCUP((margin / entryUnitCost) * 100) : 0;
             await addRecord('costHistory', {
                 productId:    mov.productId,
                 costPrice:    roundCUP(entryUnitCost),
@@ -3892,9 +3902,12 @@ async function undoMovement(movementId) {
         const snapMap  = new Map(allProds.map(p => [p.id, {...p}]));
 
         for (const item of items) {
-            // Restaurar stock en origen
+            // Restaurar stock en origen y capas FIFO originales.
             const orig = snapMap.get(item.productId);
             if (orig) orig.quantity += item.quantity;
+            await restoreStockAllocations(item.productId,item.location||movement.sourceLocation,item.lotAllocations||[]);
+            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation);
+            for(const lot of movedLots) await deleteRecord('stockLots',lot.id);
 
             // Restar stock en destino
             let destId = item.destProductId;
@@ -3939,7 +3952,7 @@ async function undoMovement(movementId) {
         const product=await getRecordById('products',item.productId);
         if (!product) continue;
         if (movement.type==='Salida'||movement.type==='Merma') { product.quantity+=item.quantity; await restoreStockAllocations(item.productId,item.location||product.location,item.lotAllocations||[]); }
-        else if (movement.type==='Entrada'||movement.type==='Devolución') { product.quantity=Math.max(0,product.quantity-item.quantity); }
+        else if (movement.type==='Entrada'||movement.type==='Devolución') { product.quantity=Math.max(0,product.quantity-item.quantity); const lots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.productId===item.productId);for(const lot of lots)await deleteRecord('stockLots',lot.id); }
         await updateRecord('products',product);
     }
     movement.undone=true; movement.undoneAt=Date.now();
@@ -4744,7 +4757,7 @@ async function exportBackupJSON() {
     const categories=await getAllRecords('categories');
     const locations=await getAllRecords('locations');
     const backup={
-        version:1, backupVersion:5,
+        version:1, backupVersion:6,
         exportedAt:new Date().toISOString(),
         exchangeRate:getExchangeRate(),
         products, movements, stockLots,
@@ -4818,7 +4831,7 @@ async function mergeBackup(backup, currentProducts, currentMovements, conflicts)
 
     // Backup de seguridad antes de fusionar (incluye todos los stores v5)
     const safetyBackup={
-        version:1, backupVersion:5,
+        version:1, backupVersion:6,
         exportedAt:new Date().toISOString(),
         exchangeRate:getExchangeRate(),
         products:currentProducts, movements:currentMovements,
