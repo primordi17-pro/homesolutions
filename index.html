@@ -1819,7 +1819,7 @@
                 <div style="display:flex;flex-direction:column;gap:14px">
                     <div>
                         <label class="form-label">Cantidad *</label>
-                        <input type="number" id="quickSaleQuantity" required min="1" value="1" class="form-input">
+                        <input type="number" id="quickSaleQuantity" required min="1" value="1" class="form-input" oninput="updateQuickSaleFIFOEstimate()">
                         <p style="font-size:11.5px;color:var(--text-3);margin-top:5px">
                             Stock disponible: <strong id="quickSaleStock">0</strong> · Ubicación: <span id="quickSaleLocation" style="font-weight:600;color:var(--navy)"></span>
                         </p>
@@ -2395,6 +2395,7 @@ async function ensureMermaLocation(){const ls=await getAllRecords('locations');l
 async function ensureProductLots(p){if(!p||p.quantity<=0)return[];let ls=(await getAllRecords('stockLots')).filter(l=>l.productId===p.id&&l.location===p.location&&l.quantityRemaining>0);const total=ls.reduce((n,l)=>n+l.quantityRemaining,0);if(total<p.quantity)await addRecord('stockLots',{productId:p.id,location:p.location,quantityRemaining:p.quantity-total,originalQuantity:p.quantity-total,unitCost:roundCUP(p.price||0),unitSale:roundCUP(p.salePrice||p.price||0),createdAt:p.dateAdded||Date.now(),migrated:true});return(await getAllRecords('stockLots')).filter(l=>l.productId===p.id&&l.location===p.location&&l.quantityRemaining>0);}
 async function consumeStockFIFO(p,q){const ls=await ensureProductLots(p);ls.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||(a.id||0)-(b.id||0));let left=q,cost=0,sale=0;const allocations=[];for(const l of ls){if(left<=0)break;const take=Math.min(left,l.quantityRemaining);l.quantityRemaining-=take;await updateRecord('stockLots',l);allocations.push({lotId:l.id,quantity:take,unitCost:l.unitCost||0,unitSale:l.unitSale||0,createdAt:l.createdAt||Date.now()});cost+=take*(l.unitCost||0);sale+=take*(l.unitSale||0);left-=take;}if(left>0){allocations.push({lotId:null,quantity:left,unitCost:p.price||0,unitSale:p.salePrice||p.price||0,createdAt:Date.now(),fallback:true});cost+=left*(p.price||0);sale+=left*(p.salePrice||p.price||0);}return{allocations,averageCost:roundCUP(cost/q),averageSale:roundCUP(sale/q)};}
 async function addStockLot(pid,loc,q,cost,sale,date=Date.now(),movementId=null){if(q>0)return addRecord('stockLots',{productId:pid,location:loc,quantityRemaining:q,originalQuantity:q,unitCost:roundCUP(cost||0),unitSale:roundCUP(sale||0),createdAt:date,movementId});}
+async function quoteStockFIFO(p,q){const ls=await ensureProductLots(p);ls.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||(a.id||0)-(b.id||0));let left=q,cost=0,sale=0;for(const l of ls){if(left<=0)break;const take=Math.min(left,l.quantityRemaining);cost+=take*(l.unitCost||0);sale+=take*(l.unitSale||0);left-=take;}if(left>0){cost+=left*(p.price||0);sale+=left*(p.salePrice||p.price||0);}return{averageCost:roundCUP(cost/q),averageSale:roundCUP(sale/q)};}
 async function restoreStockAllocations(pid,loc,allocs){for(const a of allocs||[]){if(a.lotId){const l=await getRecordById('stockLots',a.lotId);if(l){l.quantityRemaining+=a.quantity;await updateRecord('stockLots',l);continue;}}await addStockLot(pid,loc,a.quantity,a.unitCost,a.unitSale,a.createdAt||Date.now());}}
 
 function updateRecord(storeName, data) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readwrite'); const s=tx.objectStore(storeName); const r=s.put(data); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
@@ -2749,7 +2750,7 @@ function renderPage() {
             : '';
         const isSelected   = selectedProductIds.has(product.id);
         const sinStock     = product.quantity === 0;
-        const noSaleLoc    = product.location === 'Almacén central';
+        const noSaleLoc    = getLocationType((window.__locationCache||[]).find(l=>l.name===product.location)) === 'Almacén';
         const checkboxBlocked = sinStock || noSaleLoc;
         const checkboxTitle = noSaleLoc ? 'Almacén central no permite venta directa' : (sinStock ? 'Sin stock — no se puede vender' : '');
         tbody.innerHTML += `
@@ -3224,18 +3225,16 @@ async function openMultiSaleModal() {
     document.getElementById('multiSaleModal').classList.add('active');
 }
 
-function updateMultiSaleTotal() {
-    let total = 0;
-    document.querySelectorAll('.ms-qty-input:not(:disabled)').forEach(input => {
-        const max   = parseInt(input.dataset.max) || 0;
-        const raw   = parseInt(input.value) || 0;
-        const qty   = Math.max(0, Math.min(raw, max));
-        const price = parseFloat(input.dataset.salePrice) || 0;
-        const sub   = roundCUP(qty * price);
-        total       = roundCUP(total + sub);
-        const subEl = input.closest('.ms-sale-item')?.querySelector('.ms-subtotal');
-        if (subEl) subEl.textContent = `$${sub.toFixed(2)}`;
-    });
+async function updateMultiSaleTotal() {
+    let total=0;
+    for(const input of document.querySelectorAll('.ms-qty-input:not(:disabled)')) {
+        const max=parseInt(input.dataset.max)||0,raw=parseInt(input.value)||0,qty=Math.max(0,Math.min(raw,max));
+        const p=productsById[parseInt(input.dataset.productId)];
+        const quote=p&&qty>0?await quoteStockFIFO(p,qty):{averageSale:parseFloat(input.dataset.salePrice)||0};
+        const price=quote.averageSale||0;input.dataset.salePrice=price;
+        const sub=roundCUP(qty*price);total=roundCUP(total+sub);
+        const subEl=input.closest('.ms-sale-item')?.querySelector('.ms-subtotal');if(subEl)subEl.textContent=`${sub.toFixed(2)}`;
+    }
     const totalEl = document.getElementById('multiSaleTotal');
     const totalCUP = roundCUP(total * getExchangeRate());
     if (totalEl) totalEl.textContent = `$${total.toFixed(2)} USD ≈ ${totalCUP.toFixed(2)} CUP`;
@@ -3286,6 +3285,9 @@ async function confirmMultiSale() {
         for (const item of items) {
             const p = await getRecordById('products', item.productId);
             if (!p) continue;
+            if(getLocationType((window.__locationCache||[]).find(l=>l.name===p.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
+            const fifo=await consumeStockFIFO(p,item.quantity);
+            item.salePrice=fifo.averageSale;item.costPrice=fifo.averageCost;item.lotAllocations=fifo.allocations;
             p.quantity -= item.quantity;
             await updateRecord('products', p);
             productsById[p.id] = p;
@@ -3325,14 +3327,14 @@ async function confirmMultiSale() {
 async function openQuickSaleModal(productId) {
     const product = await getRecordById('products', productId);
     if (!product) return;
-    if (product.location === 'Almacén central') {
+    if (getLocationType((window.__locationCache||[]).find(l=>l.name===product.location)) === 'Almacén') {
         await appAlert('Los productos en Almacén central no se pueden vender directamente. Transfiérelo a Tienda primero.','warning','Venta no permitida');
         return;
     }
-    const salePrice = product.salePrice||product.price;
-    const profit = salePrice-product.price;
+    const fifoQuote=await quoteStockFIFO(product,1),salePrice=fifoQuote.averageSale,displayCost=fifoQuote.averageCost;
+    const profit=salePrice-displayCost;
     const canViewCost = ROLES[currentRole].canViewCost;
-    const isPending = product.costPending || !product.price;
+    const isPending = product.costPending || !displayCost;
     document.getElementById('quickSaleProductId').value = productId;
     document.getElementById('quickSaleProductName').textContent = `${product.brand} — ${product.color} · ${product.category}`;
     document.getElementById('quickSaleStock').textContent = product.quantity;
@@ -3347,7 +3349,7 @@ async function openQuickSaleModal(productId) {
         costEl.style.color = 'var(--amber)';
         costEl.style.fontStyle = 'italic';
     } else {
-        costEl.textContent = `$${product.price.toFixed(2)} USD (≈ ${roundCUP(product.price*rate).toFixed(2)} CUP)`;
+        costEl.textContent = `${displayCost.toFixed(2)} USD (≈ ${roundCUP(displayCost*rate).toFixed(2)} CUP)`;
         costEl.style.color = '';
         costEl.style.fontStyle = 'normal';
     }
@@ -3368,8 +3370,10 @@ async function openQuickSaleModal(productId) {
     if (costRow)   costRow.style.display   = canViewCost ? '' : 'none';
     if (profitRow) profitRow.style.display = canViewCost ? '' : 'none';
     document.getElementById('quickSaleModal').dataset.salePrice = salePrice;
+    document.getElementById('quickSaleModal').dataset.displayCost = displayCost;
     document.getElementById('quickSaleModal').classList.add('active');
 }
+async function updateQuickSaleFIFOEstimate(){const id=parseInt(document.getElementById('quickSaleProductId').value),q=parseInt(document.getElementById('quickSaleQuantity').value)||1,p=await getRecordById('products',id);if(!p||q<1)return;const quote=await quoteStockFIFO(p,Math.min(q,p.quantity)),rate=getExchangeRate(),sale=quote.averageSale,cost=quote.averageCost;document.getElementById('qpSale').textContent=`${sale.toFixed(2)} USD (≈ ${roundCUP(sale*rate).toFixed(2)} CUP)`;document.getElementById('qpCost').textContent=cost>0?`${cost.toFixed(2)} USD (≈ ${roundCUP(cost*rate).toFixed(2)} CUP)`:'Costo pendiente';document.getElementById('qpProfit').textContent=cost>0?`${(sale-cost).toFixed(2)} USD`:'Costo pendiente';document.getElementById('quickSaleModal').dataset.salePrice=sale;document.getElementById('quickSaleModal').dataset.displayCost=cost;}
 function closeQuickSaleModal() { document.getElementById('quickSaleModal').classList.remove('active'); }
 
 async function saveQuickSale(event) {
