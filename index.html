@@ -2051,7 +2051,8 @@ document.getElementById('appModalOverlay').addEventListener('click', (e) => {
 const USERS = {
     'ChispaMotos': { hash: 'da33a89f1b5252537dc4eda71b4878f88d616b4a030e09ed100ebfa4254d5470', role: 'admin', label: 'Administrador' },
     'Vendedor1': { hash: 'ec2775656c5ea23e9e98dfa6ea61cdabd643bc982d44b568b0be964bbe90247b', role: 'vendor_tienda', label: 'Vendedor 1' },
-    'Vendedor2': { hash: '79aef1bf609def75c6c16d99207fa08d85fe54c21e77d0a83078af6bdc07d639', role: 'vendor_tienda', label: 'Vendedor 2' }
+    'Vendedor2': { hash: '79aef1bf609def75c6c16d99207fa08d85fe54c21e77d0a83078af6bdc07d639', role: 'vendor_tienda', label: 'Vendedor 2' },
+    'Almacenero': { hash: 'a4f16b2d1cc1b188c8705df3eb329d39e734add4d1c90ae8065b278690bff9c4', role: 'almacenero', label: 'Almacenero' }
 };
 const ROLES = {
     // NOTA (route B, Sprint U1): "locations" ya NO vive aquí — se quitó el array estático.
@@ -2216,7 +2217,7 @@ function applyRoleUI() {
     const roleBadge = document.getElementById('sidebarRoleBadge');
     roleBadge.className = `${currentRole === 'admin' ? 'role-badge-admin' : 'role-badge-vendor'}`;
     roleBadge.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:999px;font-weight:700;white-space:nowrap';
-    roleBadge.textContent = currentRole === 'admin' ? 'Admin' : 'Vendedor';
+    roleBadge.textContent = currentRole === 'admin' ? 'Admin' : (currentRole === 'almacenero' ? 'Almacenero' : 'Vendedor');
     const avatar = document.getElementById('sidebarUserIcon');
     if (avatar) avatar.textContent = currentUser.charAt(0).toUpperCase();
 
@@ -2327,8 +2328,10 @@ function initDatabase() {
             }
 
             // ── Stores v4 (nuevos) ──
+            let createdCostHistory = false;
             if (!db.objectStoreNames.contains('costHistory')) {
                 const s = db.createObjectStore('costHistory', { keyPath:'id', autoIncrement:true });
+                createdCostHistory = true;
                 s.createIndex('productId','productId',{unique:false});
                 s.createIndex('date','date',{unique:false});
             }
@@ -2374,21 +2377,13 @@ function initDatabase() {
                 const existingProducts = getAllReq.result || [];
                 existingProducts.forEach(p => {
                     if (createdStockLots && p.quantity>0) tx.objectStore('stockLots').add({productId:p.id,location:p.location,quantityRemaining:p.quantity,originalQuantity:p.quantity,unitCost:roundCUP(p.price||0),unitSale:roundCUP(p.salePrice||p.price||0),createdAt:p.dateAdded||migrateTS,migrated:true});
-                    const cost = roundCUP(p.price || 0);
-                    const sale = roundCUP(p.salePrice || p.price || 0);
-                    const margin = roundCUP(sale - cost);
-                    const marginPct = cost > 0 ? roundCUP((margin / cost) * 100) : 0;
-                    costHistoryStore.add({
-                        productId:    p.id,
-                        costPrice:    cost,
-                        salePrice:    sale,
-                        margin,
-                        marginPct,
-                        exchangeRate: null,   // null = tasa desconocida en migración
-                        date:         p.dateAdded || migrateTS,
-                        movementId:   null,
-                        isMigrated:   true
-                    });
+                    if (createdCostHistory) {
+                        const cost = roundCUP(p.price || 0);
+                        const sale = roundCUP(p.salePrice || p.price || 0);
+                        const margin = roundCUP(sale - cost);
+                        const marginPct = cost > 0 ? roundCUP((margin / cost) * 100) : 0;
+                        costHistoryStore.add({ productId:p.id, costPrice:cost, salePrice:sale, margin, marginPct, exchangeRate:null, date:p.dateAdded||migrateTS, movementId:null, isMigrated:true });
+                    }
                 });
             };
         };
@@ -3035,6 +3030,7 @@ async function saveProduct(event) {
                 undone: false,
                 registeredBy: currentUser || 'Admin'
             });
+            await addStockLot(newId,location,quantity,price,salePrice,Date.now(),movId);
             // F1: registrar costHistory solo si hay precio de costo conocido
             if (!costPending && price > 0) {
                 await addRecord('costHistory', {
@@ -3384,10 +3380,10 @@ async function saveQuickSale(event) {
     const product=await getRecordById('products',productId);
     if (!product) { await appAlert('No se pudo encontrar el producto.','error','Error'); return; }
     if (quantity>product.quantity) { await appAlert(`Stock insuficiente. Disponible: ${product.quantity} en ${product.location}.`,'warning','⚠️ Sin stock'); document.getElementById('quickSaleQuantity').value=product.quantity; return; }
+    if(getLocationType((window.__locationCache||[]).find(l=>l.name===product.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
     const fifo=await consumeStockFIFO(product,quantity);
     const frozenCostPrice=fifo.averageCost;
     const frozenSalePrice=fifo.averageSale||roundCUP(product.salePrice||product.price);
-    if(getLocationType((window.__locationCache||[]).find(l=>l.name===product.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
     product.quantity-=quantity;
     await updateRecord('products',product);
     await addRecord('movements',{ type:'Salida', items:[{productId,quantity,salePrice:frozenSalePrice,costPrice:frozenCostPrice,location:product.location,lotAllocations:fifo.allocations}], sourceLocation:product.location, notes:notes||'Venta rápida', date:Date.now(), undone:false, registeredBy:currentUser||'Admin', exchangeRateUsed:getExchangeRate() });
@@ -3726,9 +3722,11 @@ async function saveMovement(event) {
     const sharedDate = Date.now();
     const newLocation = document.getElementById('movementNewLocation').value;
     if(type==='Merma') await ensureMermaLocation();
+    if(type==='Transferencia'&&currentRole==='almacenero'&&getLocationType((window.__locationCache||[]).find(l=>l.name===newLocation))==='Merma'){await appAlert('El destino de una transferencia debe ser un almacén o punto de venta activo.','warning','Destino inválido');return;}
     const costRaw=document.getElementById('entryCostPrice')?.value, saleRaw=document.getElementById('entrySalePrice')?.value;
     const entryCost=currentRole==='admin'&&costRaw!==''?parseFloat(costRaw):null, entrySale=currentRole==='admin'&&saleRaw!==''?parseFloat(saleRaw):null;
     if(type==='Entrada'&&((entryCost!==null&&(!Number.isFinite(entryCost)||entryCost<0))||(entrySale!==null&&(!Number.isFinite(entrySale)||entrySale<=0)))){await appAlert('Verifica los precios nuevos.','warning','Precio inválido');return;}
+    if(type==='Entrada'&&(entryCost!==null||entrySale!==null)&&document.querySelectorAll('[id^="saleItem_"]').length!==1){await appAlert('Para editar precios en una entrada, registra un solo producto por movimiento.','warning','Entrada de un producto');return;}
     const allProdsSnapshot = await getAllRecords('products');
     const productsMap = new Map(allProdsSnapshot.map(p => [p.id, {...p}]));
 
