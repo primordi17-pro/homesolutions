@@ -2925,10 +2925,19 @@ async function saveProduct(event) {
     const category=document.getElementById('productCategory').value.trim();
     const location=document.getElementById('productLocation').value.trim();
     const productId=document.getElementById('productId').value;
-    const quantity=parseInt(document.getElementById('productQuantity').value);
+    const quantity=Number(document.getElementById('productQuantity').value);
     const salePriceRaw=parseFloat(document.getElementById('productSalePrice').value);
-    const minStock=parseInt(document.getElementById('productMinStock').value)||0;
+    const minStock=Number(document.getElementById('productMinStock').value)||0;
     const role = ROLES[currentRole];
+    if(!role||!role.canCreateProduct){await appAlert('Tu rol no tiene permiso para crear o editar productos.','warning','Acceso restringido');return;}
+    if(!Number.isInteger(quantity)||quantity<0||!Number.isInteger(minStock)||minStock<0){await appAlert('Las cantidades deben ser números enteros no negativos.','warning','Cantidad inválida');return;}
+    if(currentRole!=='admin'&&!accessibleLocationNames.includes(location)){await appAlert('No tienes permiso para registrar productos en esa locación.','warning','Locación no autorizada');return;}
+    if(productId){
+        const existing=await getRecordById('products',parseInt(productId));
+        if(!existing){await appAlert('No se encontró el producto que intentas editar.','error','Producto inexistente');return;}
+        if(currentRole!=='admin'&&!accessibleLocationNames.includes(existing.location)){await appAlert('No tienes acceso a este producto.','warning','Acceso restringido');return;}
+        if(quantity!==existing.quantity||location!==existing.location){await appAlert('El stock y la locación no se modifican desde la ficha del producto. Registra una Entrada, Salida o Transferencia para conservar el historial FIFO.','warning','Usa Movimientos de inventario');return;}
+    }
 
     // Precio de compra — solo admin lo ingresa, y puede dejarlo vacío (costPending)
     let price = 0;
