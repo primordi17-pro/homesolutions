@@ -3822,7 +3822,7 @@ async function saveMovement(event) {
             type,
             items: [{ productId: mov.productId, quantity: mov.quantity, salePrice: roundCUP(unitSale||0),
                       costPrice: roundCUP(unitCost||0), location: mov.itemLocation,
-                      destProductId: realDestId, destLocation: type==='Merma'?'Merma':mov.destLocation, lotAllocations:fifo?.allocations||[] }],
+                      destProductId: realDestId, destLocation: type==='Merma'?'Merma':mov.destLocation, lotAllocations:fifo?.allocations||[], pricesChanged:type==='Entrada'&&(entryCost!==null||entrySale!==null), previousCostPrice:mov.product.price, previousSalePrice:mov.product.salePrice }],
             sourceLocation: sourceLocation || mov.itemLocation || '',
             notes,
             date: sharedDate,
@@ -3954,7 +3954,7 @@ async function undoMovement(movementId) {
         const product=await getRecordById('products',item.productId);
         if (!product) continue;
         if (movement.type==='Salida'||movement.type==='Merma') { product.quantity+=item.quantity; await restoreStockAllocations(item.productId,item.location||product.location,item.lotAllocations||[]); }
-        else if (movement.type==='Entrada'||movement.type==='Devolución') { product.quantity=Math.max(0,product.quantity-item.quantity); const lots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.productId===item.productId);for(const lot of lots)await deleteRecord('stockLots',lot.id); }
+        else if (movement.type==='Entrada'||movement.type==='Devolución') { product.quantity=Math.max(0,product.quantity-item.quantity); const lots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.productId===item.productId);for(const lot of lots)await deleteRecord('stockLots',lot.id); if(movement.type==='Entrada'&&item.pricesChanged){product.price=item.previousCostPrice||0;product.salePrice=item.previousSalePrice||product.price;product.costPending=!(product.price>0);product.margin=product.price>0?roundCUP(product.salePrice-product.price):null;product.marginPct=product.price>0?roundCUP(product.margin/product.price*100):null;} }
         await updateRecord('products',product);
     }
     movement.undone=true; movement.undoneAt=Date.now();
