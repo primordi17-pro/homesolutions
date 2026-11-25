@@ -3097,6 +3097,8 @@ async function editProduct(id) {
 
 async function deleteProduct(id) {
     if(!ROLES[currentRole]?.canDeleteProduct){await appAlert('Tu rol no puede eliminar productos.','warning','Acceso restringido');return;}
+    const productToDelete=await getRecordById('products',id);
+    if(productToDelete&&productToDelete.quantity>0){await appAlert(`No se puede eliminar ${productToDelete.brand} — ${productToDelete.color} porque conserva ${productToDelete.quantity} unidades. Registra primero la merma o transfiere las existencias.`,'warning','Producto con existencias');return;}
     if (await appConfirm('El historial conservará el nombre del producto.','warning','🗑️ Eliminar producto','Eliminar','Cancelar','danger')) {
         const product = await getRecordById('products', id);
         if (product) {
