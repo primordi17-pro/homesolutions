@@ -1294,6 +1294,7 @@
                 <span class="nav-icon">🔄</span>
                 <span class="sidebar-label">Movimientos</span>
             </a>
+            <a href="#" class="sidebar-link" data-section="mermas" data-tooltip="Mermas"><span class="nav-icon">⚠️</span><span class="sidebar-label">Mermas</span></a>
             <a href="#" class="sidebar-link" data-section="reports" data-tooltip="Reportes">
                 <span class="nav-icon">📈</span>
                 <span class="sidebar-label">Reportes y Ventas</span>
@@ -1537,6 +1538,8 @@
             </div>
         </section>
 
+        <!-- ── REGISTRO DE MERMAS ── -->
+        <section id="mermas" class="hidden"><div class="page-header"><div><h2 class="page-title">Registro de Mermas</h2><p class="page-subtitle">Todas las pérdidas y bajas de inventario registradas</p></div><button class="btn-secondary" onclick="loadMermas()">↻ Actualizar</button></div><div class="card" style="overflow:hidden"><div class="table-container"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Locación de origen</th><th>Registrado por</th><th>Notas</th><th>Costo estimado</th></tr></thead><tbody id="mermasTableBody"></tbody></table></div></div></section>
         <!-- ── SUPERVISIÓN ── -->
         <!-- ── REPORTES ── -->
         <section id="reports" class="hidden">
@@ -1761,6 +1764,7 @@
                         </div>
                         <div id="saleItemsList"></div>
                     </div>
+                    <details id="entryPriceDetails" class="hidden" style="border:1px solid var(--border);border-radius:10px;padding:12px"><summary style="cursor:pointer;font-weight:700;font-size:13px">Editar precios (solo administrador)</summary><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px"><div><label class="form-label">Nuevo precio de compra</label><input type="number" min="0" step="0.01" id="entryCostPrice" class="form-input" placeholder="Mantener actual"></div><div><label class="form-label">Nuevo precio de venta</label><input type="number" min="0.01" step="0.01" id="entrySalePrice" class="form-input" placeholder="Mantener actual"></div></div><p style="font-size:11px;color:var(--text-3);margin-top:8px">Solo afecta las unidades de esta entrada. Las existencias y ventas anteriores conservan sus precios históricos.</p></details>
                     <div id="transferLocationDiv" class="hidden">
                         <label class="form-label">Nueva Ubicación (Destino) *</label>
                         <select id="movementNewLocation" class="form-input form-select">
@@ -1815,7 +1819,7 @@
                 <div style="display:flex;flex-direction:column;gap:14px">
                     <div>
                         <label class="form-label">Cantidad *</label>
-                        <input type="number" id="quickSaleQuantity" required min="1" value="1" class="form-input">
+                        <input type="number" id="quickSaleQuantity" required min="1" value="1" class="form-input" oninput="updateQuickSaleFIFOEstimate()">
                         <p style="font-size:11.5px;color:var(--text-3);margin-top:5px">
                             Stock disponible: <strong id="quickSaleStock">0</strong> · Ubicación: <span id="quickSaleLocation" style="font-weight:600;color:var(--navy)"></span>
                         </p>
@@ -1928,7 +1932,7 @@
             </div>
             <div class="table-container">
                 <table>
-                    <thead><tr><th>Nombre</th><th>Roles con acceso</th><th>Estado</th><th>Acciones</th></tr></thead>
+                    <thead><tr><th>Nombre</th><th>Tipo</th><th>Roles con acceso</th><th>Estado</th><th>Acciones</th></tr></thead>
                     <tbody id="locationsTableBody"></tbody>
                 </table>
             </div>
@@ -1951,6 +1955,7 @@
                         <label class="form-label">Nombre *</label>
                         <input type="text" id="locationName" required class="form-input" placeholder="Ej: Almacén Norte">
                     </div>
+                    <div><label class="form-label">Tipo de locación *</label><select id="locationType" required class="form-input form-select"><option value="Almacén">Almacén</option><option value="Punto de venta">Punto de venta</option></select></div>
                     <div>
                         <label class="form-label">Roles con acceso</label>
                         <p style="font-size:11.5px;color:var(--text-3);margin:0 0 8px">Administrador siempre tiene acceso total; no necesita marcarse.</p>
@@ -2046,31 +2051,32 @@ document.getElementById('appModalOverlay').addEventListener('click', (e) => {
 const USERS = {
     'ChispaMotos': { hash: 'da33a89f1b5252537dc4eda71b4878f88d616b4a030e09ed100ebfa4254d5470', role: 'admin', label: 'Administrador' },
     'Vendedor1': { hash: 'ec2775656c5ea23e9e98dfa6ea61cdabd643bc982d44b568b0be964bbe90247b', role: 'vendor_tienda', label: 'Vendedor 1' },
-    'Vendedor2': { hash: '79aef1bf609def75c6c16d99207fa08d85fe54c21e77d0a83078af6bdc07d639', role: 'vendor_tienda', label: 'Vendedor 2' }
+    'Vendedor2': { hash: '79aef1bf609def75c6c16d99207fa08d85fe54c21e77d0a83078af6bdc07d639', role: 'vendor_tienda', label: 'Vendedor 2' },
+    'Almacenero': { hash: 'a4f16b2d1cc1b188c8705df3eb329d39e734add4d1c90ae8065b278690bff9c4', role: 'almacenero', label: 'Almacenero' }
 };
 const ROLES = {
     // NOTA (route B, Sprint U1): "locations" ya NO vive aquí — se quitó el array estático.
     // La fuente de verdad es el store 'locations', vía locations[].allowedRoles.
     // admin usa canViewAllLocations:true como bypass; el resto se resuelve en refreshAccessibleLocations().
-    admin: { sections:['dashboard','products','movements','reports'], movements:['Entrada','Salida','Merma','Transferencia','Devolución'], canViewAllLocations:true, canExport:true, canBackup:true, canEditExchangeRate:true, canDeleteProduct:true, canCreateProduct:true, canQuickSale:true, canViewCost:true, canManageCatalog:true },
-    vendor_tienda: { sections:['products','movements'], movements:['Entrada','Salida','Merma','Devolución'], canViewAllLocations:false, canExport:false, canBackup:true, canEditExchangeRate:true, canDeleteProduct:false, canCreateProduct:true, canQuickSale:true, canViewCost:false, entradaCreateOnly:true, canManageCatalog:false }
+    admin: { sections:['dashboard','products','movements','mermas','reports'], movements:['Entrada','Salida','Merma','Transferencia','Devolución'], canViewAllLocations:true, canExport:true, canBackup:true, canEditExchangeRate:true, canDeleteProduct:true, canCreateProduct:true, canQuickSale:true, canViewCost:true, canManageCatalog:true },
+    vendor_tienda: { sections:['products','movements'], movements:['Entrada','Salida','Merma','Devolución'], canViewAllLocations:false, canExport:false, canBackup:true, canEditExchangeRate:true, canDeleteProduct:false, canCreateProduct:true, canQuickSale:true, canViewCost:false, entradaCreateOnly:true, canManageCatalog:false },
+    almacenero: { sections:['products','movements'], movements:['Entrada','Transferencia'], canViewAllLocations:false, canExport:false, canBackup:false, canEditExchangeRate:false, canDeleteProduct:false, canCreateProduct:false, canQuickSale:false, canViewCost:false, entradaCreateOnly:false, canManageCatalog:false, warehouseOnly:true }
 };
 // Etiquetas legibles de rol — usadas en los checkboxes de allowedRoles del modal de locación
-const ROLE_LABELS = { admin: 'Administrador', vendor_tienda: 'Vendedor Tienda' };
+const ROLE_LABELS = { admin: 'Administrador', vendor_tienda: 'Vendedor Tienda', almacenero: 'Almacenero' };
 let currentUser = null, currentRole = null;
 
 // ========== INICIO: ACCESO DINÁMICO A LOCACIONES (route B) ==========
 // Reemplaza a ROLES[rol].locations. Se recalcula al login y cada vez que el store 'locations' cambia.
 let accessibleLocationNames = [];
 
+async function normalizeLocationCatalog(){const ls=await getAllRecords('locations');for(const l of ls){if(!l.type)l.type=l.name==='Tienda'?'Punto de venta':(/almac[eé]n/i.test(l.name)?'Almacén':'Punto de venta');if(l.name==='Tienda'&&(!Array.isArray(l.allowedRoles)||!l.allowedRoles.length))l.allowedRoles=['vendor_tienda'];if(l.name==='Almacén central'&&(!Array.isArray(l.allowedRoles)||l.allowedRoles.includes('vendor_tienda')))l.allowedRoles=['almacenero'];await updateRecord('locations',l);}}
 async function refreshAccessibleLocations() {
     const role = ROLES[currentRole];
     if (!role) { accessibleLocationNames = []; return; }
     const allLocs = await getAllRecords('locations');
     const activeLocs = allLocs.filter(l => l.isActive);
-    accessibleLocationNames = role.canViewAllLocations
-        ? activeLocs.map(l => l.name)
-        : activeLocs.filter(l => Array.isArray(l.allowedRoles) && l.allowedRoles.includes(currentRole)).map(l => l.name);
+    accessibleLocationNames = role.canViewAllLocations ? activeLocs.filter(l=>l.special!=='merma').map(l=>l.name) : activeLocs.filter(l=>Array.isArray(l.allowedRoles)&&l.allowedRoles.includes(currentRole)&&(currentRole!=='almacenero'||getLocationType(l)==='Almacén')&&l.special!=='merma').map(l=>l.name);
 }
 // ========== FIN: ACCESO DINÁMICO A LOCACIONES (route B) ==========
 
@@ -2123,6 +2129,7 @@ async function attemptLogin() {
     try {
         await initDatabase();
         await loadAllData();
+        await normalizeLocationCatalog();
         await refreshAccessibleLocations();
         await refreshCatalogSelects();
         applyRoleUI();
@@ -2169,7 +2176,7 @@ function applyLocationFilters() {
         Array.from(movementType.options).forEach(opt => {
             if (!opt.value) return;
             // vendor_tienda: Entrada se hace desde "Nuevo Producto", no desde el modal de movimientos
-            if (currentRole === 'vendor_tienda' && opt.value === 'Entrada') {
+            if ((currentRole === 'vendor_tienda' && opt.value === 'Entrada') || (currentRole === 'almacenero' && !role.movements.includes(opt.value))) {
                 opt.hidden = true;
             } else {
                 opt.hidden = !role.movements.includes(opt.value);
@@ -2192,10 +2199,8 @@ function applyLocationFilters() {
     // Filtro de ubicación destino en transferencias
     const movementNewLocation = document.getElementById('movementNewLocation');
     if (movementNewLocation) {
-        Array.from(movementNewLocation.options).forEach(opt => {
-            if (!opt.value) return;
-            opt.hidden = !accessibleLocationNames.includes(opt.value);
-        });
+        const allLocs=window.__locationCache||[];
+        Array.from(movementNewLocation.options).forEach(opt => { if (!opt.value) return; opt.hidden=currentRole==='almacenero'?!allLocs.some(l=>l.name===opt.value&&l.isActive!==false&&l.special!=='merma'):!accessibleLocationNames.includes(opt.value); });
     }
 
     // Columnas precio venta y ganancia — solo admin las ve
@@ -2212,7 +2217,7 @@ function applyRoleUI() {
     const roleBadge = document.getElementById('sidebarRoleBadge');
     roleBadge.className = `${currentRole === 'admin' ? 'role-badge-admin' : 'role-badge-vendor'}`;
     roleBadge.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:999px;font-weight:700;white-space:nowrap';
-    roleBadge.textContent = currentRole === 'admin' ? 'Admin' : 'Vendedor';
+    roleBadge.textContent = currentRole === 'admin' ? 'Admin' : (currentRole === 'almacenero' ? 'Almacenero' : 'Vendedor');
     const avatar = document.getElementById('sidebarUserIcon');
     if (avatar) avatar.textContent = currentUser.charAt(0).toUpperCase();
 
@@ -2293,7 +2298,7 @@ document.addEventListener('keydown', (e) => {
 
 // ══ DATABASE ══
 const DB_NAME = 'TechInventoryLVUSD';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 let db;
 let allProductsCache = [];
 let productsById = {};
@@ -2323,8 +2328,10 @@ function initDatabase() {
             }
 
             // ── Stores v4 (nuevos) ──
+            let createdCostHistory = false;
             if (!db.objectStoreNames.contains('costHistory')) {
                 const s = db.createObjectStore('costHistory', { keyPath:'id', autoIncrement:true });
+                createdCostHistory = true;
                 s.createIndex('productId','productId',{unique:false});
                 s.createIndex('date','date',{unique:false});
             }
@@ -2351,13 +2358,16 @@ function initDatabase() {
                 // Seed: locaciones actuales con allowedRoles fiel al ROLES estático previo
                 // (admin siempre tiene acceso total vía canViewAllLocations — no necesita allowedRoles)
                 const seedLocations = [
-                    { name:'Tienda',          isActive:true, allowedRoles:['vendor_tienda'] },
-                    { name:'Almacén central', isActive:true, allowedRoles:['vendor_tienda'] }
+                    { name:'Tienda', type:'Punto de venta', isActive:true, allowedRoles:['vendor_tienda'] },
+                    { name:'Almacén central', type:'Almacén', isActive:true, allowedRoles:['almacenero'] }
                 ];
                 seedLocations.forEach(loc => locDynStore.add(loc));
             }
             // ========== FIN: STORES V5 — CATEGORIES / LOCATIONS ==========
 
+            // ── v6: capas FIFO por lote ──
+            let createdStockLots = false;
+            if (!db.objectStoreNames.contains('stockLots')) { const lotsStore=db.createObjectStore('stockLots',{keyPath:'id',autoIncrement:true}); lotsStore.createIndex('productId','productId',{unique:false}); lotsStore.createIndex('location','location',{unique:false}); lotsStore.createIndex('createdAt','createdAt',{unique:false}); createdStockLots=true; }
             // ── Migración: poblar costHistory desde productos existentes ──
             const migrateTS = Date.now();
             const productsStore = tx.objectStore('products');
@@ -2366,27 +2376,28 @@ function initDatabase() {
             getAllReq.onsuccess = () => {
                 const existingProducts = getAllReq.result || [];
                 existingProducts.forEach(p => {
-                    const cost = roundCUP(p.price || 0);
-                    const sale = roundCUP(p.salePrice || p.price || 0);
-                    const margin = roundCUP(sale - cost);
-                    const marginPct = cost > 0 ? roundCUP((margin / cost) * 100) : 0;
-                    costHistoryStore.add({
-                        productId:    p.id,
-                        costPrice:    cost,
-                        salePrice:    sale,
-                        margin,
-                        marginPct,
-                        exchangeRate: null,   // null = tasa desconocida en migración
-                        date:         p.dateAdded || migrateTS,
-                        movementId:   null,
-                        isMigrated:   true
-                    });
+                    if (createdStockLots && p.quantity>0) tx.objectStore('stockLots').add({productId:p.id,location:p.location,quantityRemaining:p.quantity,originalQuantity:p.quantity,unitCost:roundCUP(p.price||0),unitSale:roundCUP(p.salePrice||p.price||0),createdAt:p.dateAdded||migrateTS,migrated:true});
+                    if (createdCostHistory) {
+                        const cost = roundCUP(p.price || 0);
+                        const sale = roundCUP(p.salePrice || p.price || 0);
+                        const margin = roundCUP(sale - cost);
+                        const marginPct = cost > 0 ? roundCUP((margin / cost) * 100) : 0;
+                        costHistoryStore.add({ productId:p.id, costPrice:cost, salePrice:sale, margin, marginPct, exchangeRate:null, date:p.dateAdded||migrateTS, movementId:null, isMigrated:true });
+                    }
                 });
             };
         };
     });
 }
 function addRecord(storeName, data) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readwrite'); const s=tx.objectStore(storeName); const r=s.add(data); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function getLocationType(loc){return loc?.type||(/almac[eé]n/i.test(loc?.name||'')?'Almacén':'Punto de venta');}
+async function ensureMermaLocation(){const ls=await getAllRecords('locations');let l=ls.find(x=>x.special==='merma'||x.name==='Merma');if(!l){const id=await addRecord('locations',{name:'Merma',type:'Merma',special:'merma',isActive:true,allowedRoles:[]});l=await getRecordById('locations',id);}return l;}
+async function ensureProductLots(p){if(!p||p.quantity<=0)return[];let ls=(await getAllRecords('stockLots')).filter(l=>l.productId===p.id&&l.location===p.location&&l.quantityRemaining>0);const total=ls.reduce((n,l)=>n+l.quantityRemaining,0);if(total<p.quantity)await addRecord('stockLots',{productId:p.id,location:p.location,quantityRemaining:p.quantity-total,originalQuantity:p.quantity-total,unitCost:roundCUP(p.price||0),unitSale:roundCUP(p.salePrice||p.price||0),createdAt:p.dateAdded||Date.now(),migrated:true});return(await getAllRecords('stockLots')).filter(l=>l.productId===p.id&&l.location===p.location&&l.quantityRemaining>0);}
+async function consumeStockFIFO(p,q){if(!Number.isInteger(q)||q<1)throw new Error('La cantidad FIFO debe ser un entero positivo.');const ls=await ensureProductLots(p);ls.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||(a.id||0)-(b.id||0));const available=ls.reduce((n,l)=>n+(l.quantityRemaining||0),0);if(available<q)throw new Error(`Capas FIFO insuficientes para ${p.brand||'producto'}: ${available} disponibles y ${q} solicitadas.`);let left=q,cost=0,sale=0;const allocations=[];for(const l of ls){if(left<=0)break;const take=Math.min(left,l.quantityRemaining);l.quantityRemaining-=take;await updateRecord('stockLots',l);allocations.push({lotId:l.id,quantity:take,unitCost:l.unitCost||0,unitSale:l.unitSale||0,createdAt:l.createdAt||Date.now()});cost+=take*(l.unitCost||0);sale+=take*(l.unitSale||0);left-=take;}if(left!==0)throw new Error('No se pudo completar el consumo FIFO.');return{allocations,averageCost:roundCUP(cost/q),averageSale:roundCUP(sale/q)};}
+async function addStockLot(pid,loc,q,cost,sale,date=Date.now(),movementId=null){if(q>0)return addRecord('stockLots',{productId:pid,location:loc,quantityRemaining:q,originalQuantity:q,unitCost:roundCUP(cost||0),unitSale:roundCUP(sale||0),createdAt:date,movementId});}
+async function quoteStockFIFO(p,q){if(!Number.isInteger(q)||q<1)throw new Error('La cantidad FIFO debe ser un entero positivo.');const ls=await ensureProductLots(p);ls.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||(a.id||0)-(b.id||0));let left=q,cost=0,sale=0;for(const l of ls){if(left<=0)break;const take=Math.min(left,l.quantityRemaining);cost+=take*(l.unitCost||0);sale+=take*(l.unitSale||0);left-=take;}if(left>0)throw new Error(`Stock FIFO insuficiente para ${p.brand||'producto'}.`);return{averageCost:roundCUP(cost/q),averageSale:roundCUP(sale/q)};}
+async function restoreStockAllocations(pid,loc,allocs){for(const a of allocs||[]){if(a.lotId){const l=await getRecordById('stockLots',a.lotId);if(l){l.quantityRemaining+=a.quantity;await updateRecord('stockLots',l);continue;}}await addStockLot(pid,loc,a.quantity,a.unitCost,a.unitSale,a.createdAt||Date.now());}}
+
 function updateRecord(storeName, data) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readwrite'); const s=tx.objectStore(storeName); const r=s.put(data); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 function deleteRecord(storeName, id) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readwrite'); const s=tx.objectStore(storeName); const r=s.delete(id); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
 function getAllRecords(storeName) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readonly'); const s=tx.objectStore(storeName); const r=s.getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
@@ -2421,7 +2432,8 @@ async function populateLocationSelect(selectId) {
     const placeholder = sel.querySelector('option[value=""]');
     const placeholderHtml = placeholder ? placeholder.outerHTML : '<option value="">Seleccionar…</option>';
     sel.innerHTML = placeholderHtml;
-    const active = locs.filter(l => l.isActive !== false).sort((a,b) => a.name.localeCompare(b.name));
+    window.__locationCache=locs;
+    const active = locs.filter(l => l.isActive !== false && l.special!=='merma' && l.name!=='Merma').sort((a,b) => a.name.localeCompare(b.name));
     active.forEach(l => {
         const opt = document.createElement('option');
         opt.value = l.name; opt.textContent = l.name;
@@ -2505,6 +2517,7 @@ function openProductCategoryModal(catId = null) {
 function closeProductCategoryModal() { document.getElementById('productCategoryModal').classList.remove('active'); }
 
 async function saveProductCategory(event) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar categorías.','warning','Acceso restringido');return;}
     event.preventDefault();
     const catId = document.getElementById('productCategoryId').value;
     const name  = document.getElementById('productCategoryName').value.trim();
@@ -2523,6 +2536,7 @@ async function saveProductCategory(event) {
 }
 
 async function toggleProductCategoryActive(catId, currentlyActive) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar categorías.','warning','Acceso restringido');return;}
     const cat = await getRecordById('categories', catId);
     if (!cat) return;
     cat.isActive = !currentlyActive;
@@ -2533,6 +2547,7 @@ async function toggleProductCategoryActive(catId, currentlyActive) {
 }
 
 async function deleteProductCategory(catId) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar categorías.','warning','Acceso restringido');return;}
     const cat = await getRecordById('categories', catId);
     if (!cat) return;
     const products = await getAllRecords('products');
@@ -2566,6 +2581,7 @@ async function loadLocationsTable() {
     locs.sort((a,b) => a.name.localeCompare(b.name));
     for (const l of locs) {
         const active = l.isActive !== false;
+        if(l.special==='merma'||l.name==='Merma') continue;
         const roles  = Array.isArray(l.allowedRoles) ? l.allowedRoles : [];
         const rolesLabel = roles.length
             ? roles.map(r => ROLE_LABELS[r] || r).join(', ')
@@ -2573,6 +2589,7 @@ async function loadLocationsTable() {
         tbody.innerHTML += `
             <tr>
                 <td style="font-weight:600">${escHtml(l.name)}</td>
+                <td style="font-size:12.5px">${escHtml(getLocationType(l))}</td>
                 <td style="font-size:12.5px">${rolesLabel}</td>
                 <td>${active ? '<span class="badge badge-success">Activa</span>' : '<span class="badge" style="background:#F3F4F6;color:#9CA3AF">Inactiva</span>'}</td>
                 <td>
@@ -2603,6 +2620,7 @@ function openLocationModal(locId = null) {
             if (l) {
                 document.getElementById('locationId').value = l.id;
                 document.getElementById('locationName').value = l.name;
+                document.getElementById('locationType').value = getLocationType(l);
                 const allowed = Array.isArray(l.allowedRoles) ? l.allowedRoles : [];
                 document.querySelectorAll('.location-role-checkbox').forEach(cb => {
                     cb.checked = allowed.includes(cb.value);
@@ -2615,17 +2633,19 @@ function openLocationModal(locId = null) {
 function closeLocationModal() { document.getElementById('locationModal').classList.remove('active'); }
 
 async function saveLocation(event) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar locaciones.','warning','Acceso restringido');return;}
     event.preventDefault();
     const locId = document.getElementById('locationId').value;
     const name  = document.getElementById('locationName').value.trim();
     if (!name) return;
     const allowedRoles = Array.from(document.querySelectorAll('.location-role-checkbox:checked')).map(cb => cb.value);
+    const type = document.getElementById('locationType').value;
     if (locId) {
         const existing = await getRecordById('locations', parseInt(locId));
-        if (existing) { Object.assign(existing, { name, allowedRoles }); await updateRecord('locations', existing); }
+        if (existing) { Object.assign(existing, { name, type, allowedRoles }); await updateRecord('locations', existing); }
         showToast('Locación actualizada.', 'success', 'Guardado');
     } else {
-        await addRecord('locations', { name, allowedRoles, isActive: true });
+        await addRecord('locations', { name, type, allowedRoles, isActive: true });
         showToast('Locación creada.', 'success', 'Guardado');
     }
     closeLocationModal();
@@ -2635,6 +2655,7 @@ async function saveLocation(event) {
 }
 
 async function toggleLocationActive(locId, currentlyActive) {
+    if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar locaciones.','warning','Acceso restringido');return;}
     if (currentlyActive) {
         // Bloqueo: no desactivar una locación con productos existentes — se quedarían huérfanos de vista
         const prods = await getAllRecords('products');
@@ -2666,12 +2687,13 @@ function showSection(sectionId) {
     if (sectionId === 'dashboard')   loadDashboard();
     if (sectionId === 'products')    loadProducts();
     if (sectionId === 'movements')   loadMovements();
+    if (sectionId === 'mermas')       loadMermas();
     if (sectionId === 'reports')     loadDailySalesReport();
     // ── Móvil: cerrar drawer y actualizar label topbar ──
     if (window.innerWidth <= 768) closeMobileSidebar();
     var mobileLabel = document.getElementById('mobileCurrentSection');
     if (mobileLabel) {
-        var labels = { dashboard:'Dashboard', products:'Productos', movements:'Movimientos', reports:'Reportes' };
+        var labels = { dashboard:'Dashboard', products:'Productos', movements:'Movimientos', mermas:'Mermas', reports:'Reportes' };
         mobileLabel.textContent = labels[sectionId] || sectionId;
     }
 }
@@ -2733,7 +2755,7 @@ function renderPage() {
             : '';
         const isSelected   = selectedProductIds.has(product.id);
         const sinStock     = product.quantity === 0;
-        const noSaleLoc    = product.location === 'Almacén central';
+        const noSaleLoc    = getLocationType((window.__locationCache||[]).find(l=>l.name===product.location)) === 'Almacén';
         const checkboxBlocked = sinStock || noSaleLoc;
         const checkboxTitle = noSaleLoc ? 'Almacén central no permite venta directa' : (sinStock ? 'Sin stock — no se puede vender' : '');
         tbody.innerHTML += `
@@ -2908,10 +2930,19 @@ async function saveProduct(event) {
     const category=document.getElementById('productCategory').value.trim();
     const location=document.getElementById('productLocation').value.trim();
     const productId=document.getElementById('productId').value;
-    const quantity=parseInt(document.getElementById('productQuantity').value);
+    const quantity=Number(document.getElementById('productQuantity').value);
     const salePriceRaw=parseFloat(document.getElementById('productSalePrice').value);
-    const minStock=parseInt(document.getElementById('productMinStock').value)||0;
+    const minStock=Number(document.getElementById('productMinStock').value)||0;
     const role = ROLES[currentRole];
+    if(!role||!role.canCreateProduct){await appAlert('Tu rol no tiene permiso para crear o editar productos.','warning','Acceso restringido');return;}
+    if(!Number.isInteger(quantity)||quantity<0||!Number.isInteger(minStock)||minStock<0){await appAlert('Las cantidades deben ser números enteros no negativos.','warning','Cantidad inválida');return;}
+    if(currentRole!=='admin'&&!accessibleLocationNames.includes(location)){await appAlert('No tienes permiso para registrar productos en esa locación.','warning','Locación no autorizada');return;}
+    if(productId){
+        const existing=await getRecordById('products',parseInt(productId));
+        if(!existing){await appAlert('No se encontró el producto que intentas editar.','error','Producto inexistente');return;}
+        if(currentRole!=='admin'&&!accessibleLocationNames.includes(existing.location)){await appAlert('No tienes acceso a este producto.','warning','Acceso restringido');return;}
+        if(quantity!==existing.quantity||location!==existing.location){await appAlert('El stock y la locación no se modifican desde la ficha del producto. Registra una Entrada, Salida o Transferencia para conservar el historial FIFO.','warning','Usa Movimientos de inventario');return;}
+    }
 
     // Precio de compra — solo admin lo ingresa, y puede dejarlo vacío (costPending)
     let price = 0;
@@ -2941,7 +2972,8 @@ async function saveProduct(event) {
         costPending = true;
     }
 
-    const salePrice = salePriceRaw;
+    let salePrice = salePriceRaw;
+    if (productId && !role.canViewCost) { const prior=await getRecordById('products',parseInt(productId)); if(prior) salePrice=prior.salePrice||prior.price; }
     if (!salePrice||salePrice<=0) { await appAlert('El precio de venta no puede ser cero o negativo.','warning','⚠️ Precio inválido'); return; }
     if (role.canViewCost && price > 0 && salePrice<price) { if (!await appConfirm(`Precio de venta (${salePrice.toFixed(2)}) menor que compra (${price.toFixed(2)}). ¿Es intencional?`,'warning','⚠️ Venta a pérdida','Sí, es intencional','Cancelar')) return; }
     if (quantity===0) { if (!await appConfirm('El producto se registrará sin stock. ¿Continuar?','warning','⚠️ Cantidad cero','Continuar','Cancelar')) return; }
@@ -2955,6 +2987,7 @@ async function saveProduct(event) {
     let originalDateAdded = Date.now();
     if (productId) {
         const originalProduct = await getRecordById('products', parseInt(productId));
+        if(role.canViewCost&&originalProduct&&(roundCUP(price)!==roundCUP(originalProduct.price||0)||roundCUP(salePrice)!==roundCUP(originalProduct.salePrice||originalProduct.price||0))){await appAlert('Los precios de las existencias nuevas se establecen al registrar una Entrada. No cambies precios desde la ficha del producto, para conservar la valoración histórica de los lotes.','warning','Actualiza precios mediante una Entrada');return;}
        originalDateAdded = (originalProduct && originalProduct.dateAdded)
         ? originalProduct.dateAdded
         : Date.now();
@@ -3013,6 +3046,7 @@ async function saveProduct(event) {
                 undone: false,
                 registeredBy: currentUser || 'Admin'
             });
+            await addStockLot(newId,location,quantity,price,salePrice,Date.now(),movId);
             // F1: registrar costHistory solo si hay precio de costo conocido
             if (!costPending && price > 0) {
                 await addRecord('costHistory', {
@@ -3062,6 +3096,9 @@ async function editProduct(id) {
 }
 
 async function deleteProduct(id) {
+    if(!ROLES[currentRole]?.canDeleteProduct){await appAlert('Tu rol no puede eliminar productos.','warning','Acceso restringido');return;}
+    const productToDelete=await getRecordById('products',id);
+    if(productToDelete&&productToDelete.quantity>0){await appAlert(`No se puede eliminar ${productToDelete.brand} — ${productToDelete.color} porque conserva ${productToDelete.quantity} unidades. Registra primero la merma o transfiere las existencias.`,'warning','Producto con existencias');return;}
     if (await appConfirm('El historial conservará el nombre del producto.','warning','🗑️ Eliminar producto','Eliminar','Cancelar','danger')) {
         const product = await getRecordById('products', id);
         if (product) {
@@ -3206,18 +3243,16 @@ async function openMultiSaleModal() {
     document.getElementById('multiSaleModal').classList.add('active');
 }
 
-function updateMultiSaleTotal() {
-    let total = 0;
-    document.querySelectorAll('.ms-qty-input:not(:disabled)').forEach(input => {
-        const max   = parseInt(input.dataset.max) || 0;
-        const raw   = parseInt(input.value) || 0;
-        const qty   = Math.max(0, Math.min(raw, max));
-        const price = parseFloat(input.dataset.salePrice) || 0;
-        const sub   = roundCUP(qty * price);
-        total       = roundCUP(total + sub);
-        const subEl = input.closest('.ms-sale-item')?.querySelector('.ms-subtotal');
-        if (subEl) subEl.textContent = `$${sub.toFixed(2)}`;
-    });
+async function updateMultiSaleTotal() {
+    let total=0;
+    for(const input of document.querySelectorAll('.ms-qty-input:not(:disabled)')) {
+        const max=parseInt(input.dataset.max)||0,raw=parseInt(input.value)||0,qty=Math.max(0,Math.min(raw,max));
+        const p=productsById[parseInt(input.dataset.productId)];
+        const quote=p&&qty>0?await quoteStockFIFO(p,qty):{averageSale:parseFloat(input.dataset.salePrice)||0};
+        const price=quote.averageSale||0;input.dataset.salePrice=price;
+        const sub=roundCUP(qty*price);total=roundCUP(total+sub);
+        const subEl=input.closest('.ms-sale-item')?.querySelector('.ms-subtotal');if(subEl)subEl.textContent=`${sub.toFixed(2)}`;
+    }
     const totalEl = document.getElementById('multiSaleTotal');
     const totalCUP = roundCUP(total * getExchangeRate());
     if (totalEl) totalEl.textContent = `$${total.toFixed(2)} USD ≈ ${totalCUP.toFixed(2)} CUP`;
@@ -3243,6 +3278,7 @@ async function confirmMultiSale() {
             if (qty === 0) continue;
             const product   = productsById[productId];
             if (!product) continue;
+            if(getLocationType((window.__locationCache||[]).find(l=>l.name===product.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
             if (qty > product.quantity) {
                 await appAlert(`Stock insuficiente para "${escHtml(product.brand)}". Disponible: ${product.quantity}.`, 'warning', '⚠️ Sin stock suficiente');
                 return;
@@ -3268,6 +3304,8 @@ async function confirmMultiSale() {
         for (const item of items) {
             const p = await getRecordById('products', item.productId);
             if (!p) continue;
+            const fifo=await consumeStockFIFO(p,item.quantity);
+            item.salePrice=fifo.averageSale;item.costPrice=fifo.averageCost;item.lotAllocations=fifo.allocations;
             p.quantity -= item.quantity;
             await updateRecord('products', p);
             productsById[p.id] = p;
@@ -3307,14 +3345,14 @@ async function confirmMultiSale() {
 async function openQuickSaleModal(productId) {
     const product = await getRecordById('products', productId);
     if (!product) return;
-    if (product.location === 'Almacén central') {
-        await appAlert('Los productos en Almacén central no se pueden vender directamente. Transfiérelo a Tienda primero.','warning','Venta no permitida');
+    if (getLocationType((window.__locationCache||[]).find(l=>l.name===product.location)) === 'Almacén') {
+        await appAlert('Los productos ubicados en almacenes no se pueden vender directamente. Transfiérelos a un punto de venta primero.','warning','Venta no permitida');
         return;
     }
-    const salePrice = product.salePrice||product.price;
-    const profit = salePrice-product.price;
+    const fifoQuote=await quoteStockFIFO(product,1),salePrice=fifoQuote.averageSale,displayCost=fifoQuote.averageCost;
+    const profit=salePrice-displayCost;
     const canViewCost = ROLES[currentRole].canViewCost;
-    const isPending = product.costPending || !product.price;
+    const isPending = !displayCost;
     document.getElementById('quickSaleProductId').value = productId;
     document.getElementById('quickSaleProductName').textContent = `${product.brand} — ${product.color} · ${product.category}`;
     document.getElementById('quickSaleStock').textContent = product.quantity;
@@ -3329,7 +3367,7 @@ async function openQuickSaleModal(productId) {
         costEl.style.color = 'var(--amber)';
         costEl.style.fontStyle = 'italic';
     } else {
-        costEl.textContent = `$${product.price.toFixed(2)} USD (≈ ${roundCUP(product.price*rate).toFixed(2)} CUP)`;
+        costEl.textContent = `${displayCost.toFixed(2)} USD (≈ ${roundCUP(displayCost*rate).toFixed(2)} CUP)`;
         costEl.style.color = '';
         costEl.style.fontStyle = 'normal';
     }
@@ -3350,23 +3388,30 @@ async function openQuickSaleModal(productId) {
     if (costRow)   costRow.style.display   = canViewCost ? '' : 'none';
     if (profitRow) profitRow.style.display = canViewCost ? '' : 'none';
     document.getElementById('quickSaleModal').dataset.salePrice = salePrice;
+    document.getElementById('quickSaleModal').dataset.displayCost = displayCost;
     document.getElementById('quickSaleModal').classList.add('active');
 }
+async function updateQuickSaleFIFOEstimate(){const id=parseInt(document.getElementById('quickSaleProductId').value),q=parseInt(document.getElementById('quickSaleQuantity').value)||1,p=await getRecordById('products',id);if(!p||q<1)return;const quote=await quoteStockFIFO(p,Math.min(q,p.quantity)),rate=getExchangeRate(),sale=quote.averageSale,cost=quote.averageCost;document.getElementById('qpSale').textContent=`${sale.toFixed(2)} USD (≈ ${roundCUP(sale*rate).toFixed(2)} CUP)`;document.getElementById('qpCost').textContent=cost>0?`${cost.toFixed(2)} USD (≈ ${roundCUP(cost*rate).toFixed(2)} CUP)`:'Costo pendiente';document.getElementById('qpProfit').textContent=cost>0?`${(sale-cost).toFixed(2)} USD`:'Costo pendiente';document.getElementById('quickSaleModal').dataset.salePrice=sale;document.getElementById('quickSaleModal').dataset.displayCost=cost;}
 function closeQuickSaleModal() { document.getElementById('quickSaleModal').classList.remove('active'); }
 
 async function saveQuickSale(event) {
     event.preventDefault();
+    if(currentRole==='almacenero'){await appAlert('El rol almacenero no puede registrar ventas.','warning','Acceso restringido');return;}
     const productId=parseInt(document.getElementById('quickSaleProductId').value);
     const quantity=parseInt(document.getElementById('quickSaleQuantity').value);
     const notes=document.getElementById('quickSaleNotes').value;
+    if(!Number.isInteger(quantity)||quantity<1){await appAlert('La cantidad debe ser un entero mayor que cero.','warning','Cantidad inválida');return;}
     const product=await getRecordById('products',productId);
     if (!product) { await appAlert('No se pudo encontrar el producto.','error','Error'); return; }
+    if(currentRole!=='admin'&&!accessibleLocationNames.includes(product.location)){await appAlert('No tienes acceso a la locación de este producto.','warning','Acceso restringido');return;}
     if (quantity>product.quantity) { await appAlert(`Stock insuficiente. Disponible: ${product.quantity} en ${product.location}.`,'warning','⚠️ Sin stock'); document.getElementById('quickSaleQuantity').value=product.quantity; return; }
-    const frozenCostPrice=roundCUP(product.price);
-    const frozenSalePrice=roundCUP(product.salePrice||product.price);
+    if(getLocationType((window.__locationCache||[]).find(l=>l.name===product.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
+    const fifo=await consumeStockFIFO(product,quantity);
+    const frozenCostPrice=fifo.averageCost;
+    const frozenSalePrice=fifo.averageSale||roundCUP(product.salePrice||product.price);
     product.quantity-=quantity;
     await updateRecord('products',product);
-    await addRecord('movements',{ type:'Salida', items:[{productId,quantity,salePrice:frozenSalePrice,costPrice:frozenCostPrice,location:product.location}], sourceLocation:product.location, notes:notes||'Venta rápida', date:Date.now(), undone:false, registeredBy:currentUser||'Admin', exchangeRateUsed:getExchangeRate() });
+    await addRecord('movements',{ type:'Salida', items:[{productId,quantity,salePrice:frozenSalePrice,costPrice:frozenCostPrice,location:product.location,lotAllocations:fifo.allocations}], sourceLocation:product.location, notes:notes||'Venta rápida', date:Date.now(), undone:false, registeredBy:currentUser||'Admin', exchangeRateUsed:getExchangeRate() });
     stampLastModified();
     showToast('La venta fue registrada correctamente.','success','💰 Venta completada');
     closeQuickSaleModal(); loadMovements(); loadProducts(); loadDashboard();
@@ -3427,10 +3472,13 @@ function filterProductDropdown(idx, forcedLocation=null) {
     const alreadySelected=getSelectedProductIds(idx);
     const filtered=allProductsCache.filter(p=>{
         const matchLoc=!filterLoc||p.location===filterLoc;
-        const matchSaleLoc=movType!=='Salida'||p.location!=='Almacén central';
+        const locType=getLocationType((window.__locationCache||[]).find(l=>l.name===p.location));
+        const matchSaleLoc=movType!=='Salida'||locType!=='Almacén';
+        const matchRoleLoc=currentRole==='admin'||accessibleLocationNames.includes(p.location);
+        const matchNotMerma=p.location!=='Merma';
         const matchQuery=!query||p.brand.toLowerCase().includes(query)||p.color.toLowerCase().includes(query)||p.category.toLowerCase().includes(query)||p.location.toLowerCase().includes(query);
         const notDuplicate=!alreadySelected.has(p.id);
-        return matchLoc&&matchSaleLoc&&matchQuery&&notDuplicate;
+        return matchLoc&&matchSaleLoc&&matchRoleLoc&&matchNotMerma&&matchQuery&&notDuplicate;
     });
     dropdown.innerHTML='';
     if (filtered.length===0) { dropdown.innerHTML='<div class="product-option no-results">No se encontraron productos</div>'; }
@@ -3518,6 +3566,8 @@ async function loadMovements() {
     movementsCache = movements;
     applyMovementFilters();
 }
+
+async function loadMermas(){const body=document.getElementById('mermasTableBody');if(!body)return;const ms=(await getAllRecords('movements')).filter(m=>m.type==='Merma'&&!m.undone).sort((a,b)=>b.date-a.date);body.innerHTML='';if(!ms.length){body.innerHTML='<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-3)">Todavía no hay mermas registradas.</td></tr>';return;}const ps=await getAllRecords('products'),byId=new Map(ps.map(p=>[p.id,p]));for(const m of ms){const it=(m.items||[])[0]||{},p=byId.get(it.productId),name=p?`${p.brand} — ${p.color}`:(it.archivedName||'Producto eliminado'),cost=roundCUP((it.costPrice||0)*(it.quantity||0));body.innerHTML+=`<tr><td>${new Date(m.date).toLocaleString('es-ES')}</td><td>${escHtml(name)}</td><td style="font-weight:700">${it.quantity||0}</td><td>${escHtml(it.location||m.sourceLocation||'—')}</td><td>${escHtml(m.registeredBy||'—')}</td><td>${escHtml(m.notes||'—')}</td><td class="mono">${cost.toFixed(2)}</td></tr>`;}}
 
 function toggleMovSort() {
     movSortAsc = !movSortAsc;
@@ -3621,6 +3671,7 @@ async function openMovementModal() {
     saleItemsCount=0;
     document.getElementById('sourceLocationDiv').classList.add('hidden');
     document.getElementById('transferLocationDiv').classList.add('hidden');
+    document.getElementById('entryPriceDetails').classList.add('hidden'); document.getElementById('entryCostPrice').value=''; document.getElementById('entrySalePrice').value='';
     applyLocationFilters();
     addSaleItem();
     document.getElementById('movementModal').classList.add('active');
@@ -3640,6 +3691,7 @@ function handleMovementTypeChange() {
     document.getElementById('transferLocationDiv').classList.toggle('hidden',type!=='Transferencia');
     document.getElementById('movementNewLocation').required=(type==='Transferencia');
     document.getElementById('sourceLocationDiv').classList.toggle('hidden',!(type==='Salida'||type==='Merma'));
+    document.getElementById('entryPriceDetails').classList.toggle('hidden',!(type==='Entrada'&&currentRole==='admin'));
     const filterLoc=document.getElementById('movementSourceLocation').value;
     document.getElementById('saleItemsList').innerHTML=''; saleItemsCount=0; addSaleItem(filterLoc);
 }
@@ -3657,6 +3709,7 @@ async function populateProductSelects(products=null) {
 async function saveMovement(event) {
     event.preventDefault();
     const type=document.getElementById('movementType').value;
+    if(!ROLES[currentRole]||!ROLES[currentRole].movements.includes(type)){await appAlert('Tu rol no tiene permiso para registrar este tipo de movimiento.','warning','Acceso restringido');return;}
     const notes=document.getElementById('movementNotes').value;
     const sourceLocation=document.getElementById('movementSourceLocation').value;
     const itemDivs=document.querySelectorAll('[id^="saleItem_"]');
@@ -3671,6 +3724,10 @@ async function saveMovement(event) {
         if (!quantity||quantity<1) { await appAlert('La cantidad debe ser mayor que cero.','warning','⚠️ Cantidad inválida'); return; }
         const product=await getRecordById('products',productId);
         if (!product) { await appAlert('No se pudo encontrar el producto.','error','Error'); return; }
+        const sourceLoc=(window.__locationCache||[]).find(l=>l.name===product.location);
+        if(currentRole==='almacenero'&&getLocationType(sourceLoc)!=='Almacén'){await appAlert('El almacenero solo puede operar con productos ubicados en almacenes.','warning','Acceso restringido');return;}
+        if(type==='Salida'&&getLocationType(sourceLoc)==='Almacén'){await appAlert('No se puede vender desde un almacén. Transfiere el producto a un punto de venta.','warning','Locación no vendible');return;}
+        if(currentRole!=='admin'&&!accessibleLocationNames.includes(product.location)){await appAlert('No tienes acceso a la locación de este producto.','warning','Acceso restringido');return;}
         if ((type==='Salida'||type==='Merma'||type==='Transferencia')&&quantity>product.quantity) {
             await appAlert(`Stock insuficiente para "${product.brand}".\nDisponible: ${product.quantity} · Solicitado: ${quantity}`,'warning','⚠️ Stock insuficiente'); return;
         }
@@ -3678,10 +3735,10 @@ async function saveMovement(event) {
     }
     if (type==='Transferencia') {
         const newLoc=document.getElementById('movementNewLocation').value;
-        const srcLoc=sourceLocation||(itemsToProcess[0]&&itemsToProcess[0].product.location)||'';
-        if (newLoc&&srcLoc&&newLoc===srcLoc) {
-            await appAlert(`Destino ("${newLoc}") igual al origen. Selecciona una ubicación diferente.`,'warning','⚠️ Transferencia inválida'); return;
-        }
+        const destination=(window.__locationCache||[]).find(l=>l.name===newLoc&&l.isActive!==false&&l.special!=='merma');
+        if(!destination){await appAlert('Selecciona una locación de destino activa.','warning','Destino inválido');return;}
+        const sameSource=itemsToProcess.find(x=>x.product.location===newLoc);
+        if(sameSource){await appAlert(`El destino ("${newLoc}") coincide con el origen de ${sameSource.product.brand}. Selecciona otra locación.`,'warning','⚠️ Transferencia inválida');return;}
     }
 
     // ── Paso 2: procesar stock y guardar UN movimiento por producto ──
@@ -3690,6 +3747,12 @@ async function saveMovement(event) {
     // eliminando la race condition por lecturas stale dentro del loop.
     const sharedDate = Date.now();
     const newLocation = document.getElementById('movementNewLocation').value;
+    if(type==='Merma') await ensureMermaLocation();
+    if(type==='Transferencia'&&currentRole==='almacenero'&&getLocationType((window.__locationCache||[]).find(l=>l.name===newLocation))==='Merma'){await appAlert('El destino de una transferencia debe ser un almacén o punto de venta activo.','warning','Destino inválido');return;}
+    const costRaw=document.getElementById('entryCostPrice')?.value, saleRaw=document.getElementById('entrySalePrice')?.value;
+    const entryCost=currentRole==='admin'&&costRaw!==''?parseFloat(costRaw):null, entrySale=currentRole==='admin'&&saleRaw!==''?parseFloat(saleRaw):null;
+    if(type==='Entrada'&&((entryCost!==null&&(!Number.isFinite(entryCost)||entryCost<0))||(entrySale!==null&&(!Number.isFinite(entrySale)||entrySale<=0)))){await appAlert('Verifica los precios nuevos.','warning','Precio inválido');return;}
+    if(type==='Entrada'&&(entryCost!==null||entrySale!==null)&&document.querySelectorAll('[id^="saleItem_"]').length!==1){await appAlert('Para editar precios en una entrada, registra un solo producto por movimiento.','warning','Entrada de un producto');return;}
     const allProdsSnapshot = await getAllRecords('products');
     const productsMap = new Map(allProdsSnapshot.map(p => [p.id, {...p}]));
 
@@ -3707,15 +3770,14 @@ async function saveMovement(event) {
 
         if (type==='Entrada'||type==='Devolución') {
             prodInMap.quantity += quantity;
+            if(type==='Entrada'&&currentRole==='admin'){if(entryCost!==null){prodInMap.price=entryCost;prodInMap.costPending=entryCost===0;}if(entrySale!==null)prodInMap.salePrice=entrySale;if(prodInMap.price>0){prodInMap.margin=roundCUP(prodInMap.salePrice-prodInMap.price);prodInMap.marginPct=roundCUP(prodInMap.margin/prodInMap.price*100);}}
         } else if (type==='Salida'||type==='Merma') {
             prodInMap.quantity -= quantity;
         } else if (type==='Transferencia') {
             prodInMap.quantity -= quantity;
 
             // BF-4: si transfiere todo, marcar origen para eliminar
-            if (prodInMap.quantity <= 0) {
-                prodIdsToDelete.push(productId);
-            }
+            // Conservar el registro con stock cero para poder deshacer transferencias y mantener la identidad del artículo.
 
             // Buscar destino en el snapshot (no en la DB en vivo)
             const destProd = allProdsSnapshot.find(p =>
@@ -3774,11 +3836,15 @@ async function saveMovement(event) {
             ? (tempIdMap.get(mov.destProductId) ?? null)
             : mov.destProductId;
 
+        const fifo=(type==='Salida'||type==='Merma'||type==='Transferencia')?await consumeStockFIFO(mov.product,mov.quantity):null;
+        const entryUnitCost=entryCost!==null?entryCost:mov.product.price;
+        const entryUnitSale=entrySale!==null?entrySale:(mov.product.salePrice||mov.product.price);
+        const unitCost=fifo?fifo.averageCost:entryUnitCost, unitSale=fifo?fifo.averageSale:entryUnitSale;
         const movId = await addRecord('movements', {
             type,
-            items: [{ productId: mov.productId, quantity: mov.quantity, salePrice: mov.frozenSale,
-                      costPrice: mov.frozenCost, location: mov.itemLocation,
-                      destProductId: realDestId, destLocation: mov.destLocation }],
+            items: [{ productId: mov.productId, quantity: mov.quantity, salePrice: roundCUP(unitSale||0),
+                      costPrice: roundCUP(unitCost||0), location: mov.itemLocation,
+                      destProductId: realDestId, destLocation: type==='Merma'?'Merma':mov.destLocation, lotAllocations:fifo?.allocations||[], pricesChanged:type==='Entrada'&&(entryCost!==null||entrySale!==null), previousCostPrice:mov.product.price, previousSalePrice:mov.product.salePrice }],
             sourceLocation: sourceLocation || mov.itemLocation || '',
             notes,
             date: sharedDate,
@@ -3787,13 +3853,15 @@ async function saveMovement(event) {
             exchangeRateUsed: type === 'Salida' ? getExchangeRate() : null
         });
 
-        if (type === 'Entrada') {
-            const margin    = roundCUP((mov.product.salePrice || mov.product.price) - mov.frozenCost);
-            const marginPct = mov.frozenCost > 0 ? roundCUP((margin / mov.frozenCost) * 100) : 0;
+        if (type === 'Transferencia' && fifo && realDestId && mov.destLocation) { for(const allocation of fifo.allocations) await addStockLot(realDestId,mov.destLocation,allocation.quantity,allocation.unitCost,allocation.unitSale,allocation.createdAt||sharedDate,movId); }
+        if (type === 'Entrada' || type === 'Devolución') {
+            await addStockLot(mov.productId,mov.itemLocation,mov.quantity,entryUnitCost,entryUnitSale,sharedDate,movId);
+            const margin    = roundCUP(entryUnitSale-entryUnitCost);
+            const marginPct = entryUnitCost > 0 ? roundCUP((margin / entryUnitCost) * 100) : 0;
             await addRecord('costHistory', {
                 productId:    mov.productId,
-                costPrice:    mov.frozenCost,
-                salePrice:    roundCUP(mov.product.salePrice || mov.product.price),
+                costPrice:    roundCUP(entryUnitCost),
+                salePrice:    roundCUP(entryUnitSale),
                 margin, marginPct,
                 exchangeRate: getExchangeRate(),
                 date:         sharedDate,
@@ -3834,21 +3902,43 @@ async function undoMovement(movementId) {
     if (!await appConfirm('Se revertirán los cambios de stock.','warning','↩ Deshacer movimiento','Deshacer','Cancelar','danger')) return;
     const items=movement.items||[{productId:movement.productId,quantity:movement.quantity,location:movement.location}];
 
-    // BF-5: detectar si revertir una Entrada o Devolución dejaría stock insuficiente
+    // No permitir revertir entradas cuyas unidades ya fueron consumidas.
+    // Borrar esas capas dejaría ventas históricas apuntando a lotes inexistentes.
     if (movement.type==='Entrada'||movement.type==='Devolución') {
-        const shortages=[];
         for (const item of items) {
             const product=await getRecordById('products',item.productId);
             if (product && product.quantity < item.quantity) {
-                shortages.push(`• ${product.brand} — ${product.color}: hay ${product.quantity} ud., se intenta restar ${item.quantity}`);
+                await appAlert(`No se puede revertir esta entrada: ${product.brand} — ${product.color} tiene ${product.quantity} ud. disponibles y la operación requiere retirar ${item.quantity}. Parte del stock ya fue utilizado.`,'warning','Reversión bloqueada');
+                return;
+            }
+            const sourceLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.productId===item.productId);
+            const consumed=sourceLots.some(l=>(l.quantityRemaining||0)<(l.originalQuantity||0));
+            if(consumed){
+                await appAlert('No se puede revertir esta entrada porque sus capas FIFO ya fueron consumidas total o parcialmente por movimientos posteriores. Deshaz primero esos movimientos en orden inverso.','warning','Capas FIFO utilizadas');
+                return;
             }
         }
-        if (shortages.length>0) {
-            const ok=await appConfirm(
-                `El stock actual es menor que la cantidad a revertir:\n\n${shortages.join('\n')}\n\nSe ajustará a 0 en los productos afectados. ¿Continuar?`,
-                'warning','⚠️ Stock insuficiente para revertir','Continuar de todas formas','Cancelar'
-            );
-            if (!ok) return;
+    }
+
+    // Una transferencia solo puede revertirse si las capas que creó siguen intactas en destino.
+    // Si fueron vendidas, mermadas o transferidas de nuevo, borrarlas rompería el historial FIFO.
+    if (movement.type === 'Transferencia') {
+        for (const item of items) {
+            const destId=item.destProductId;
+            const relatedItems=items.filter(x=>x.destProductId===destId);
+            const expectedQty=relatedItems.reduce((n,x)=>n+x.quantity,0);
+            const dest=destId?await getRecordById('products',destId):null;
+            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation&&l.productId===destId);
+            if(!dest||dest.quantity<expectedQty||relatedItems.some(x=>!Array.isArray(x.lotAllocations)||!x.lotAllocations.length)||!movedLots.length){
+                await appAlert('No se puede revertir esta transferencia con seguridad: faltan las capas FIFO de destino o el stock ya no está completo.','warning','Transferencia no reversible');
+                return;
+            }
+            const movedQty=movedLots.reduce((n,l)=>n+(l.originalQuantity||0),0);
+            const consumed=movedLots.some(l=>(l.quantityRemaining||0)<(l.originalQuantity||0));
+            if(consumed||movedQty!==expectedQty){
+                await appAlert('No se puede revertir esta transferencia porque parte de las capas transferidas ya fue consumida o movida. Deshaz primero los movimientos posteriores.','warning','Capas FIFO utilizadas');
+                return;
+            }
         }
     }
 
@@ -3858,9 +3948,12 @@ async function undoMovement(movementId) {
         const snapMap  = new Map(allProds.map(p => [p.id, {...p}]));
 
         for (const item of items) {
-            // Restaurar stock en origen
+            // Restaurar stock en origen y capas FIFO originales.
             const orig = snapMap.get(item.productId);
             if (orig) orig.quantity += item.quantity;
+            await restoreStockAllocations(item.productId,item.location||movement.sourceLocation,item.lotAllocations||[]);
+            const movedLots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.location===item.destLocation&&l.productId===item.destProductId);
+            for(const lot of movedLots) await deleteRecord('stockLots',lot.id);
 
             // Restar stock en destino
             let destId = item.destProductId;
@@ -3885,11 +3978,8 @@ async function undoMovement(movementId) {
         for (const [pid, prod] of snapMap) {
             const orig = allProds.find(p => p.id === pid);
             if (!orig) continue;
-            if (prod.quantity <= 0 && orig.quantity > 0) {
-                // destino quedó en 0 — eliminar
-                const wasOrigin = items.some(i => i.productId === pid);
-                if (!wasOrigin) { await deleteRecord('products', pid); continue; }
-            }
+            // Conservar productos destino con stock cero: los movimientos históricos
+            // siguen referenciando su ID y pueden necesitarse para auditoría.
             await updateRecord('products', prod);
         }
 
@@ -3904,8 +3994,8 @@ async function undoMovement(movementId) {
     for (const item of items) {
         const product=await getRecordById('products',item.productId);
         if (!product) continue;
-        if (movement.type==='Salida'||movement.type==='Merma') { product.quantity+=item.quantity; }
-        else if (movement.type==='Entrada'||movement.type==='Devolución') { product.quantity=Math.max(0,product.quantity-item.quantity); }
+        if (movement.type==='Salida'||movement.type==='Merma') { product.quantity+=item.quantity; await restoreStockAllocations(item.productId,item.location||product.location,item.lotAllocations||[]); }
+        else if (movement.type==='Entrada'||movement.type==='Devolución') { product.quantity=Math.max(0,product.quantity-item.quantity); const lots=(await getAllRecords('stockLots')).filter(l=>l.movementId===movement.id&&l.productId===item.productId);for(const lot of lots)await deleteRecord('stockLots',lot.id); if(movement.type==='Entrada'&&item.pricesChanged){product.price=item.previousCostPrice||0;product.salePrice=item.previousSalePrice||product.price;product.costPending=!(product.price>0);product.margin=product.price>0?roundCUP(product.salePrice-product.price):null;product.marginPct=product.price>0?roundCUP(product.margin/product.price*100):null;} }
         await updateRecord('products',product);
     }
     movement.undone=true; movement.undoneAt=Date.now();
@@ -3917,15 +4007,15 @@ async function undoMovement(movementId) {
 
 // ── DASHBOARD ──
 async function loadDashboard() {
-    const products=await getAllRecords('products');
+    const products=(await getAllRecords('products')).filter(p=>p.location!=='Merma');
     const movements=await getAllRecords('movements');
     const canViewCost = ROLES[currentRole].canViewCost;
     const totalProducts=products.reduce((s,p)=>s+p.quantity,0);
     document.getElementById('totalProducts').textContent=totalProducts;
     // Vendedoras ven el valor al precio de venta; admin ve el valor al costo — ambos en USD
-    const totalValueUSD = canViewCost
-        ? roundCUP(products.reduce((s,p)=>roundCUP(s+roundCUP(p.quantity*p.price)),0))
-        : roundCUP(products.reduce((s,p)=>roundCUP(s+roundCUP(p.quantity*(p.salePrice||p.price))),0));
+    let totalValueUSD;
+    if(canViewCost){for(const p of products)await ensureProductLots(p);const lots=await getAllRecords('stockLots');const ids=new Set(products.map(p=>p.id));totalValueUSD=roundCUP(lots.filter(l=>ids.has(l.productId)&&l.location!=='Merma').reduce((sum,l)=>sum+(l.quantityRemaining||0)*(l.unitCost||0),0));}
+    else totalValueUSD=roundCUP(products.reduce((s,p)=>roundCUP(s+roundCUP(p.quantity*(p.salePrice||p.price))),0));
     document.getElementById('totalValue').textContent=`${totalValueUSD.toFixed(2)}`;
     const totalValueHintEl = document.getElementById('totalValueHint');
     if (totalValueHintEl) totalValueHintEl.textContent = `≈ ${roundCUP(totalValueUSD*getExchangeRate()).toFixed(2)} CUP`;
@@ -4030,6 +4120,7 @@ async function saveExchangeRateToStore(currency, rate) {
     if (currency === 'USD') setExchangeRate(rate);
 }
 async function saveExchangeRate(event) {
+    if(!ROLES[currentRole]?.canEditExchangeRate){await appAlert('Tu rol no puede modificar el tipo de cambio.','warning','Acceso restringido');return;}
     event.preventDefault();
     const newRate=parseFloat(document.getElementById('exchangeRateInput').value);
     if (newRate<=0) { await appAlert('La tasa debe ser mayor que 0.','warning','Valor inválido'); return; }
@@ -4046,6 +4137,7 @@ async function saveExchangeRate(event) {
 
 // ── Tasa de cambio editable por vendedores (cuadro en Inventario) ──
 async function saveVendorExchangeRate() {
+    if(!ROLES[currentRole]?.canEditExchangeRate){await appAlert('Tu rol no puede modificar el tipo de cambio.','warning','Acceso restringido');return;}
     const input = document.getElementById('vendorRateInput');
     const newRate = parseFloat(input.value);
     if (isNaN(newRate) || newRate <= 0) {
@@ -4374,6 +4466,7 @@ function renderSummaryPage() {
 function loadDailySalesReport() { return loadSalesReport(); }
 
 async function exportDailySalesExcel() {
+    if(!ROLES[currentRole]?.canExport){await appAlert('Tu rol no puede exportar reportes.','warning','Acceso restringido');return;}
     const products = await getAllRecords('products');
     const movements = await getAllRecords('movements');
     const rate = getExchangeRate();
@@ -4557,6 +4650,7 @@ async function exportDailySalesExcel() {
 }
 
 async function exportProductsExcel() {
+    if(!ROLES[currentRole]?.canExport){await appAlert('Tu rol no puede exportar el inventario.','warning','Acceso restringido');return;}
     const products=await getAllRecords('products'); const workbook=new ExcelJS.Workbook(); const worksheet=workbook.addWorksheet('Inventario');
     const rate=getExchangeRate();
     worksheet.columns=[
@@ -4595,6 +4689,7 @@ async function exportProductsExcel() {
 }
 
 async function exportMovementsExcel() {
+    if(!ROLES[currentRole]?.canExport){await appAlert('Tu rol no puede exportar movimientos.','warning','Acceso restringido');return;}
     const movements = await getAllRecords('movements');
     const products  = await getAllRecords('products');
     const workbook  = new ExcelJS.Workbook();
@@ -4704,15 +4799,17 @@ function debounce(fn, delay) {
 
 // ══ BACKUP ══
 async function exportBackupJSON() {
+    if(!ROLES[currentRole]?.canBackup){await appAlert('Tu rol no puede exportar copias de seguridad.','warning','Acceso restringido');return;}
     const products=await getAllRecords('products'); const movements=await getAllRecords('movements');
+    const stockLots=await getAllRecords('stockLots');
     const costHistory=await getAllRecords('costHistory');
     const categories=await getAllRecords('categories');
     const locations=await getAllRecords('locations');
     const backup={
-        version:1, backupVersion:5,
+        version:1, backupVersion:6,
         exportedAt:new Date().toISOString(),
         exchangeRate:getExchangeRate(),
-        products, movements,
+        products, movements, stockLots,
         costHistory,
         categories, locations
     };
@@ -4722,6 +4819,7 @@ async function exportBackupJSON() {
 }
 
 async function importBackupJSON(event) {
+    if(!ROLES[currentRole]?.canBackup){await appAlert('Tu rol no puede importar copias de seguridad.','warning','Acceso restringido');event.target.value='';return;}
     const file=event.target.files[0]; if (!file) return;
     const reader=new FileReader();
     reader.onload=async(e)=>{
@@ -4753,6 +4851,7 @@ async function importBackupJSON(event) {
 
 async function mergeBackup(backup, currentProducts, currentMovements, conflicts) {
     const currentCostHist = await getAllRecords('costHistory');
+    const currentStockLots = await getAllRecords('stockLots');
     const currentCategories = await getAllRecords('categories');
     const currentLocations  = await getAllRecords('locations');
 
@@ -4782,11 +4881,11 @@ async function mergeBackup(backup, currentProducts, currentMovements, conflicts)
 
     // Backup de seguridad antes de fusionar (incluye todos los stores v5)
     const safetyBackup={
-        version:1, backupVersion:5,
+        version:1, backupVersion:6,
         exportedAt:new Date().toISOString(),
         exchangeRate:getExchangeRate(),
         products:currentProducts, movements:currentMovements,
-        costHistory:currentCostHist,
+        costHistory:currentCostHist, stockLots:currentStockLots,
         categories:currentCategories, locations:currentLocations,
         note:'Backup de seguridad automático antes de fusión'
     };
@@ -4816,7 +4915,9 @@ async function mergeBackup(backup, currentProducts, currentMovements, conflicts)
     mergedMovements.push(...newMovsToAdd);
 
     // Merge stores v4 — solo si existen en el backup (compatibilidad con v3)
-    const backupCostHist    = backup.costHistory        || [];
+    const backupCostHist=backup.costHistory||[], backupStockLots=backup.stockLots||[];
+    const currentStockLotIds=new Set(currentStockLots.map(l=>l.id));
+    const mergedStockLots=[...currentStockLots,...backupStockLots.filter(l=>!currentStockLotIds.has(l.id))];
     const currentCostHistIds= new Set(currentCostHist.map(h=>h.id));
     const mergedCostHist    = [...currentCostHist,    ...backupCostHist.filter(h=>!currentCostHistIds.has(h.id))];
 
@@ -4831,12 +4932,13 @@ async function mergeBackup(backup, currentProducts, currentMovements, conflicts)
     const mergedLocations   = [...currentLocations,  ...backupLocations.filter(l=>!currentLocIds.has(l.id))];
 
     // Limpiar y reescribir todos los stores
-    const storeNames = ['products','movements','costHistory','categories','locations'];
+    const storeNames = ['products','movements','costHistory','categories','locations','stockLots'];
     const txW = db.transaction(storeNames,'readwrite');
     await Promise.all(storeNames.map(s=>new Promise(r=>{txW.objectStore(s).clear().onsuccess=r;})));
     for (const p of mergedProducts)  await addRecord('products',p);
     for (const m of mergedMovements) await addRecord('movements',m);
     for (const h of mergedCostHist)  await addRecord('costHistory',h);
+    for (const l of mergedStockLots) await addRecord('stockLots',l);
     for (const c of mergedCategories) await addRecord('categories',c);
     for (const l of mergedLocations)  await addRecord('locations',l);
 
@@ -4855,7 +4957,7 @@ async function replaceWithBackup(backup) {
     // realmente los trae. Un backup v4 no los tiene: si los limpiáramos igual, el catálogo
     // de categorías/locaciones quedaría vacío sin forma de recuperarlo — se preserva intacto.
     const hasCatalogInBackup = Array.isArray(backup.categories) && Array.isArray(backup.locations);
-    const storeNames = ['products','movements','costHistory'];
+    const storeNames = ['products','movements','costHistory','stockLots'];
     if (hasCatalogInBackup) storeNames.push('categories','locations');
 
     const txW = db.transaction(storeNames,'readwrite');
@@ -4864,6 +4966,7 @@ async function replaceWithBackup(backup) {
     for (const m of backup.movements) await addRecord('movements',m);
     const backupCostHist = backup.costHistory        || [];
     for (const h of backupCostHist)  await addRecord('costHistory',h);
+    for (const l of (backup.stockLots||[])) await addRecord('stockLots',l);
     if (hasCatalogInBackup) {
         for (const c of backup.categories) await addRecord('categories',c);
         for (const l of backup.locations)  await addRecord('locations',l);
