@@ -3691,6 +3691,7 @@ async function populateProductSelects(products=null) {
 async function saveMovement(event) {
     event.preventDefault();
     const type=document.getElementById('movementType').value;
+    if(!ROLES[currentRole]||!ROLES[currentRole].movements.includes(type)){await appAlert('Tu rol no tiene permiso para registrar este tipo de movimiento.','warning','Acceso restringido');return;}
     const notes=document.getElementById('movementNotes').value;
     const sourceLocation=document.getElementById('movementSourceLocation').value;
     const itemDivs=document.querySelectorAll('[id^="saleItem_"]');
