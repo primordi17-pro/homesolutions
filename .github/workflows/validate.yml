@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, feature/inventory-fifo-merma-roles]
+    branches: [main, feature/inventory-fifo-merma-roles, test/fifo-integrity-harness]
 
 jobs:
   inline-javascript:
@@ -33,9 +33,7 @@ jobs:
               process.exitCode = 1;
             }
           }
-          assert.match(html, /async function consumeStockFIFO/);
-          assert.match(html, /if\(available<q\)/);
-          assert.match(html, /!ROLES\[currentRole\]\.movements\.includes\(type\)/);
-          assert.match(html, /Capas FIFO utilizadas/);
-          console.log('Inline JavaScript parsed and critical inventory guards found.');
+          console.log('Inline JavaScript syntax validation completed.');
           NODE
+      - name: Run FIFO regression tests
+        run: npm test
