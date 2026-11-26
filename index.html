@@ -2060,7 +2060,7 @@ const ROLES = {
     // admin usa canViewAllLocations:true como bypass; el resto se resuelve en refreshAccessibleLocations().
     admin: { sections:['dashboard','products','movements','mermas','reports'], movements:['Entrada','Salida','Merma','Transferencia','Devolución'], canViewAllLocations:true, canExport:true, canBackup:true, canEditExchangeRate:true, canDeleteProduct:true, canCreateProduct:true, canQuickSale:true, canViewCost:true, canManageCatalog:true },
     vendor_tienda: { sections:['products','movements'], movements:['Entrada','Salida','Merma','Devolución'], canViewAllLocations:false, canExport:false, canBackup:true, canEditExchangeRate:true, canDeleteProduct:false, canCreateProduct:true, canQuickSale:true, canViewCost:false, entradaCreateOnly:true, canManageCatalog:false },
-    almacenero: { sections:['products','movements'], movements:['Entrada','Transferencia'], canViewAllLocations:false, canExport:false, canBackup:false, canEditExchangeRate:false, canDeleteProduct:false, canCreateProduct:false, canQuickSale:false, canViewCost:false, entradaCreateOnly:false, canManageCatalog:false, warehouseOnly:true }
+    almacenero: { sections:['products','movements'], movements:['Entrada','Transferencia'], canViewAllLocations:false, canExport:false, canBackup:true, canEditExchangeRate:false, canDeleteProduct:false, canCreateProduct:false, canQuickSale:false, canViewCost:false, entradaCreateOnly:false, canManageCatalog:false, warehouseOnly:true }
 };
 // Etiquetas legibles de rol — usadas en los checkboxes de allowedRoles del modal de locación
 const ROLE_LABELS = { admin: 'Administrador', vendor_tienda: 'Vendedor Tienda', almacenero: 'Almacenero' };
