@@ -1701,9 +1701,10 @@
                         <input type="number" id="productPrice" min="0" step="0.01" class="form-input" placeholder="Dejar vacío si aún no se conoce">
                     </div>
                     <div style="grid-column:1/-1">
-                        <label class="form-label">Presentaciones de venta configurables</label>
-                        <textarea id="productSaleUnits" rows="3" class="form-input" placeholder="Saco | 25 | 6.50&#10;Caja | 1.44 | 8.00&#10;Rollo | 100"></textarea>
-                        <p style="font-size:11.5px;color:var(--text-3);margin-top:5px">Una por línea: nombre | cantidad base por presentación | precio USD por presentación (opcional; proporcional si se omite).</p>
+                        <label class="form-label">Presentaciones de venta <span style="font-weight:400;color:var(--text-3)">(opcional)</span></label>
+                        <div id="productSaleUnitsRows" style="display:grid;gap:8px"></div>
+                        <button type="button" id="btnAddSaleUnit" class="btn btn-secondary btn-sm" style="margin-top:9px">＋ Añadir presentación</button>
+                        <p style="font-size:11.5px;color:var(--text-3);margin-top:6px">Nombre y equivalencia son obligatorios. El precio es opcional: si lo dejas vacío, se calcula multiplicando el precio base por la equivalencia.</p>
                     </div>
                     <div>
                         <label class="form-label">Precio de Venta (USD por unidad base) *</label>
@@ -2856,8 +2857,11 @@ function filterProducts() {
 }
 
 /* UNIT_MEASURE_HELPERS_START */
-function parseSaleUnitsText(raw,baseUnit,basePrice){const base=(String(baseUnit||'unidad').trim()||'unidad'),names=new Set([base.toLocaleLowerCase()]),out=[];for(const line of String(raw||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean)){const p=line.split('|').map(x=>x.trim());if(p.length<2||p.length>3)throw new Error('Formato: Nombre | equivalencia | precio opcional.');const name=p[0],factor=Number(p[1]),price=p[2]===''||p[2]===undefined?Number(basePrice||0)*factor:Number(p[2]);if(!name||names.has(name.toLocaleLowerCase()))throw new Error('Nombre repetido o igual a la unidad base.');if(!Number.isFinite(factor)||factor<=0)throw new Error('La equivalencia debe ser mayor que cero.');if(!Number.isFinite(price)||price<=0)throw new Error('El precio de la presentación debe ser mayor que cero.');names.add(name.toLocaleLowerCase());out.push({name,factor,price});}return out;}
-function getProductSaleUnits(product){const base=(String(product?.baseUnit||'unidad').trim()||'unidad'),basePrice=Number(product?.salePrice||product?.price||0),extra=Array.isArray(product?.saleUnits)?product.saleUnits.filter(u=>u&&String(u.name||'').trim()&&Number.isFinite(Number(u.factor))&&Number(u.factor)>0&&Number.isFinite(Number(u.price))&&Number(u.price)>0):[];return [{name:base,factor:1,price:basePrice},...extra.filter(u=>String(u.name).toLocaleLowerCase()!==base.toLocaleLowerCase()).map(u=>({name:String(u.name).trim(),factor:Number(u.factor),price:Number(u.price)}))];}
+function parseSaleUnitsText(raw,baseUnit,basePrice){const base=(String(baseUnit||'unidad').trim()||'unidad'),names=new Set([base.toLocaleLowerCase()]),out=[];for(const line of String(raw||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean)){const p=line.split('|').map(x=>x.trim());if(p.length<2||p.length>3)throw new Error('Formato de presentación inválido.');const name=p[0],factor=Number(p[1]),automatic=p[2]===''||p[2]===undefined,price=automatic?Number(basePrice||0)*factor:Number(p[2]);if(!name||names.has(name.toLocaleLowerCase()))throw new Error('Nombre repetido o igual a la unidad base.');if(!Number.isFinite(factor)||factor<=0)throw new Error('La equivalencia debe ser mayor que cero.');if(!Number.isFinite(price)||price<=0)throw new Error('El precio base debe ser válido y el precio manual mayor que cero.');names.add(name.toLocaleLowerCase());out.push({name,factor,price:automatic?null:price,automatic});}return out;}
+function getProductSaleUnits(product){const base=(String(product?.baseUnit||'unidad').trim()||'unidad'),basePrice=Number(product?.salePrice||product?.price||0),extra=Array.isArray(product?.saleUnits)?product.saleUnits.filter(u=>u&&String(u.name||'').trim()&&Number.isFinite(Number(u.factor))&&Number(u.factor)>0&&((u.automatic===true||u.price===null||u.price===undefined)?basePrice*Number(u.factor)>0:Number.isFinite(Number(u.price))&&Number(u.price)>0)).map(u=>({name:String(u.name).trim(),factor:Number(u.factor),price:(u.automatic===true||u.price===null||u.price===undefined)?basePrice*Number(u.factor):Number(u.price)})):[];return [{name:base,factor:1,price:basePrice},...extra.filter(u=>String(u.name).toLocaleLowerCase()!==base.toLocaleLowerCase())];}
+function renderSaleUnitRows(units=[]){const root=document.getElementById('productSaleUnitsRows');if(!root)return;root.innerHTML='';(units||[]).forEach(u=>addSaleUnitRow(u));}
+function addSaleUnitRow(unit={}){const root=document.getElementById('productSaleUnitsRows');if(!root)return;const row=document.createElement('div');row.className='sale-unit-row';row.style.cssText='display:grid;grid-template-columns:minmax(90px,1.2fr) minmax(85px,1fr) minmax(95px,1fr) auto;gap:7px;align-items:center';row.innerHTML='<input class="form-input sale-unit-name" maxlength="24" aria-label="Nombre de presentación" placeholder="Nombre (Saco)"><input class="form-input sale-unit-factor" type="number" min="0.000001" step="any" aria-label="Equivalencia en unidad base" placeholder="Equiv."><input class="form-input sale-unit-price" type="number" min="0.000001" step="any" aria-label="Precio opcional por presentación" placeholder="Precio opcional"><button type="button" class="btn btn-secondary btn-sm sale-unit-remove" aria-label="Eliminar presentación">×</button>';row.querySelector('.sale-unit-name').value=unit.name||'';row.querySelector('.sale-unit-factor').value=unit.factor??'';row.querySelector('.sale-unit-price').value=(unit.automatic===true||unit.price===null||unit.price===undefined)?'':unit.price;row.querySelector('.sale-unit-remove').addEventListener('click',()=>row.remove());root.appendChild(row);}
+function readSaleUnitRows(){return [...document.querySelectorAll('.sale-unit-row')].map(r=>[r.querySelector('.sale-unit-name').value.trim(),r.querySelector('.sale-unit-factor').value.trim(),r.querySelector('.sale-unit-price').value.trim()].join('|')).filter(x=>x.split('|')[0]||x.split('|')[1]||x.split('|')[2]).join('\n');}
 function resolveProductSaleUnit(product,name){const units=getProductSaleUnits(product);return units.find(u=>u.name===name)||units[0];}
 function toBaseQuantity(amount,factor){const q=Number(amount),f=Number(factor);if(!Number.isFinite(q)||q<=0||!Number.isFinite(f)||f<=0)throw new Error('Cantidad y equivalencia deben ser positivas.');const base=Math.round(q*f*1000000)/1000000;if(!Number.isFinite(base)||base<=0)throw new Error('Cantidad convertida inválida.');return base;}
 function validInventoryQuantity(q){const n=Number(q);return Number.isFinite(n)&&n>0&&Math.abs(n*1000000-Math.round(n*1000000))<0.01;}
@@ -2899,7 +2903,7 @@ function openProductModal(productId=null) {
             document.getElementById('productQuantity').value = product.quantity;
             document.getElementById('productBaseUnit').value = product.baseUnit || 'unidad';
             document.getElementById('productBaseUnit').disabled = true;
-            document.getElementById('productSaleUnits').value = (product.saleUnits||[]).map(u=>u.name+' | '+u.factor+' | '+u.price).join('\n');
+            renderSaleUnitRows(product.saleUnits||[]);
             document.getElementById('productPrice').value = product.price || '';
             document.getElementById('productSalePrice').value = product.salePrice||'';
             document.getElementById('productLocation').value = product.location;
@@ -2919,7 +2923,7 @@ function openProductModal(productId=null) {
         document.getElementById('productId').value = '';
         document.getElementById('productBaseUnit').value = 'unidad';
         document.getElementById('productBaseUnit').disabled = false;
-        document.getElementById('productSaleUnits').value = '';
+        renderSaleUnitRows([]);
         const qtyInput = document.getElementById('productQuantity');
         qtyInput.disabled = false;
         document.getElementById('productQtyHint').classList.add('hidden');
@@ -2958,7 +2962,7 @@ async function saveProduct(event) {
     const productId=document.getElementById('productId').value;
     const quantity=Number(document.getElementById('productQuantity').value);
     const baseUnit=(document.getElementById('productBaseUnit').value.trim()||'unidad');
-    const saleUnitsRaw=document.getElementById('productSaleUnits').value;
+    const saleUnitsRaw=readSaleUnitRows();
     const salePriceRaw=parseFloat(document.getElementById('productSalePrice').value);
     const minStock=Number(document.getElementById('productMinStock').value)||0;
     const role = ROLES[currentRole];
@@ -5016,6 +5020,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById('filterCategory').addEventListener('change',filterProducts);
     document.getElementById('filterLocation').addEventListener('change',filterProducts);
     document.getElementById('productForm').addEventListener('submit',saveProduct);
+    document.getElementById('btnAddSaleUnit').addEventListener('click',()=>addSaleUnitRow());
     document.getElementById('btnCancelProduct').addEventListener('click',closeProductModal);
 
     document.getElementById('btnNewMovement').addEventListener('click',openMovementModal);
