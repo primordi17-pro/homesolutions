@@ -3356,31 +3356,6 @@ async function openQuickSaleModal(productId){
 }
 async function updateQuickSaleFIFOEstimate(){const p=await getRecordById('products',parseInt(document.getElementById('quickSaleProductId').value));if(!p)return;const us=getProductSaleUnits(p),u=us[Number(document.getElementById('quickSaleUnit').value)||0]||us[0],q=Number(document.getElementById('quickSaleQuantity').value)||0,bq=q>0?toBaseQuantity(q,u.factor):0,input=document.getElementById('quickSaleQuantity');input.max=p.quantity/u.factor;const fifo=bq>0&&bq<=p.quantity?await quoteStockFIFO(p,bq):{averageCost:0},cost=fifo.averageCost*u.factor,rate=getExchangeRate();document.getElementById('qpSale').textContent=`$${u.price.toFixed(2)} ${u.name} (≈ ${roundCUP(u.price*rate).toFixed(2)} CUP)`;document.getElementById('qpCost').textContent=fifo.averageCost>0?`$${cost.toFixed(2)} / ${u.name}`:'Costo pendiente';document.getElementById('qpProfit').textContent=fifo.averageCost>0?`$${(u.price-cost).toFixed(2)} / ${u.name}`:'Costo pendiente';const cv=ROLES[currentRole]?.canViewCost;document.getElementById('qsCostRow').style.display=cv?'':'none';document.getElementById('qsProfitRow').style.display=cv?'':'none';}
 async function saveQuickSale(event){event.preventDefault();if(currentRole==='almacenero'){await appAlert('El rol almacenero no puede registrar ventas.','warning','Acceso restringido');return;}const pid=parseInt(document.getElementById('quickSaleProductId').value),entered=Number(document.getElementById('quickSaleQuantity').value),p=await getRecordById('products',pid);if(!p){await appAlert('No se encontró el producto.','error','Error');return;}if(!validInventoryQuantity(entered)){await appAlert('Cantidad inválida: positiva y hasta 6 decimales.','warning','Cantidad inválida');return;}if(currentRole!=='admin'&&!accessibleLocationNames.includes(p.location)){await appAlert('No tienes acceso a la locación.','warning','Acceso restringido');return;}if(getLocationType((window.__locationCache||[]).find(l=>l.name===p.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}const us=getProductSaleUnits(p),u=us[Number(document.getElementById('quickSaleUnit').value)||0]||us[0],bq=toBaseQuantity(entered,u.factor);if(bq>p.quantity+0.000001){await appAlert(`Stock insuficiente: ${p.quantity} ${p.baseUnit||'unidad'} disponibles.`,'warning','Sin stock');return;}const fifo=await consumeStockFIFO(p,bq),saleBase=u.price/u.factor;p.quantity=Math.max(0,Math.round((p.quantity-bq)*1e6)/1e6);await updateRecord('products',p);await addRecord('movements',{type:'Salida',items:[{productId:pid,quantity:bq,salePrice:roundCUP(saleBase),costPrice:fifo.averageCost,location:p.location,lotAllocations:fifo.allocations,saleUnitName:u.name,saleEnteredQuantity:entered,saleFactor:u.factor,saleUnitPrice:u.price}],sourceLocation:p.location,notes:document.getElementById('quickSaleNotes').value||'Venta rápida',date:Date.now(),undone:false,registeredBy:currentUser||'Admin',exchangeRateUsed:getExchangeRate()});stampLastModified();showToast('Venta registrada y convertida a unidad base.','success','Venta completada');closeQuickSaleModal();loadMovements();loadProducts();loadDashboard();}
-function closeQuickSaleModal() { document.getElementById('quickSaleModal').classList.remove('active'); }
-
-async function saveQuickSale(event) {
-    event.preventDefault();
-    if(currentRole==='almacenero'){await appAlert('El rol almacenero no puede registrar ventas.','warning','Acceso restringido');return;}
-    const productId=parseInt(document.getElementById('quickSaleProductId').value);
-    const quantity=parseInt(document.getElementById('quickSaleQuantity').value);
-    const notes=document.getElementById('quickSaleNotes').value;
-    if(!Number.isInteger(quantity)||quantity<1){await appAlert('La cantidad debe ser un entero mayor que cero.','warning','Cantidad inválida');return;}
-    const product=await getRecordById('products',productId);
-    if (!product) { await appAlert('No se pudo encontrar el producto.','error','Error'); return; }
-    if(currentRole!=='admin'&&!accessibleLocationNames.includes(product.location)){await appAlert('No tienes acceso a la locación de este producto.','warning','Acceso restringido');return;}
-    if (quantity>product.quantity) { await appAlert(`Stock insuficiente. Disponible: ${product.quantity} en ${product.location}.`,'warning','⚠️ Sin stock'); document.getElementById('quickSaleQuantity').value=product.quantity; return; }
-    if(getLocationType((window.__locationCache||[]).find(l=>l.name===product.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
-    const fifo=await consumeStockFIFO(product,quantity);
-    const frozenCostPrice=fifo.averageCost;
-    const frozenSalePrice=fifo.averageSale||roundCUP(product.salePrice||product.price);
-    product.quantity-=quantity;
-    await updateRecord('products',product);
-    await addRecord('movements',{ type:'Salida', items:[{productId,quantity,salePrice:frozenSalePrice,costPrice:frozenCostPrice,location:product.location,lotAllocations:fifo.allocations}], sourceLocation:product.location, notes:notes||'Venta rápida', date:Date.now(), undone:false, registeredBy:currentUser||'Admin', exchangeRateUsed:getExchangeRate() });
-    stampLastModified();
-    showToast('La venta fue registrada correctamente.','success','💰 Venta completada');
-    closeQuickSaleModal(); loadMovements(); loadProducts(); loadDashboard();
-}
-
 // ══ MOVIMIENTOS ══
 let saleItemsCount = 0;
 
