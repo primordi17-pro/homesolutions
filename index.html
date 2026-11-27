@@ -1687,16 +1687,26 @@
                         </select>
                     </div>
                     <div>
-                        <label class="form-label">Cantidad Inicial *</label>
-                        <input type="number" id="productQuantity" required min="0" class="form-input">
+                        <label class="form-label">Unidad base del inventario *</label>
+                        <input type="text" id="productBaseUnit" required maxlength="24" class="form-input" value="unidad" placeholder="kg, m, pieza…">
+                        <p style="font-size:11px;color:var(--text-3);margin-top:4px">Stock y FIFO se guardan en esta unidad.</p>
+                    </div>
+                    <div>
+                        <label class="form-label">Cantidad Inicial (unidad base) *</label>
+                        <input type="number" id="productQuantity" required min="0" step="0.001" class="form-input">
                         <p id="productQtyHint" class="hidden" style="font-size:11.5px;color:var(--amber);margin-top:5px">🔒 Bloqueado en edición. Usa un movimiento para cambiar el stock.</p>
                     </div>
                     <div id="productPriceRow">
                         <label class="form-label">Precio de Compra (USD) <span style="color:var(--text-3);font-weight:400">(opcional)</span></label>
                         <input type="number" id="productPrice" min="0" step="0.01" class="form-input" placeholder="Dejar vacío si aún no se conoce">
                     </div>
+                    <div style="grid-column:1/-1">
+                        <label class="form-label">Presentaciones de venta configurables</label>
+                        <textarea id="productSaleUnits" rows="3" class="form-input" placeholder="Saco | 25 | 6.50&#10;Caja | 1.44 | 8.00&#10;Rollo | 100"></textarea>
+                        <p style="font-size:11.5px;color:var(--text-3);margin-top:5px">Una por línea: nombre | cantidad base por presentación | precio USD por presentación (opcional; proporcional si se omite).</p>
+                    </div>
                     <div>
-                        <label class="form-label">Precio de Venta (USD) *</label>
+                        <label class="form-label">Precio de Venta (USD por unidad base) *</label>
                         <input type="number" id="productSalePrice" required min="0" step="0.01" class="form-input" placeholder="Precio al cliente en USD">
                         <p id="productSalePriceCUPHint" style="font-size:11.5px;color:var(--text-3);margin-top:5px">Equivalente: <span id="productSalePriceCUPValue" class="mono">—</span> CUP</p>
                     </div>
@@ -1820,7 +1830,9 @@
                 <div style="display:flex;flex-direction:column;gap:14px">
                     <div>
                         <label class="form-label">Cantidad *</label>
-                        <input type="number" id="quickSaleQuantity" required min="1" value="1" class="form-input" oninput="updateQuickSaleFIFOEstimate()">
+                        <input type="number" id="quickSaleQuantity" required min="0.001" step="0.001" value="1" class="form-input" oninput="updateQuickSaleFIFOEstimate()">
+                        <label class="form-label" style="margin-top:10px">Unidad de venta</label>
+                        <select id="quickSaleUnit" class="form-input form-select" onchange="updateQuickSaleFIFOEstimate()"></select>
                         <p style="font-size:11.5px;color:var(--text-3);margin-top:5px">
                             Stock disponible: <strong id="quickSaleStock">0</strong> · Ubicación: <span id="quickSaleLocation" style="font-weight:600;color:var(--navy)"></span>
                         </p>
@@ -2393,9 +2405,9 @@ function addRecord(storeName, data) { return new Promise((res,rej) => { const tx
 function getLocationType(loc){return loc?.type||(/almac[eé]n/i.test(loc?.name||'')?'Almacén':'Punto de venta');}
 async function ensureMermaLocation(){const ls=await getAllRecords('locations');let l=ls.find(x=>x.special==='merma'||x.name==='Merma');if(!l){const id=await addRecord('locations',{name:'Merma',type:'Merma',special:'merma',isActive:true,allowedRoles:[]});l=await getRecordById('locations',id);}return l;}
 async function ensureProductLots(p){if(!p||p.quantity<=0)return[];let ls=(await getAllRecords('stockLots')).filter(l=>l.productId===p.id&&l.location===p.location&&l.quantityRemaining>0);const total=ls.reduce((n,l)=>n+l.quantityRemaining,0);if(total<p.quantity)await addRecord('stockLots',{productId:p.id,location:p.location,quantityRemaining:p.quantity-total,originalQuantity:p.quantity-total,unitCost:roundCUP(p.price||0),unitSale:roundCUP(p.salePrice||p.price||0),createdAt:p.dateAdded||Date.now(),migrated:true});return(await getAllRecords('stockLots')).filter(l=>l.productId===p.id&&l.location===p.location&&l.quantityRemaining>0);}
-async function consumeStockFIFO(p,q){if(!Number.isInteger(q)||q<1)throw new Error('La cantidad FIFO debe ser un entero positivo.');const ls=await ensureProductLots(p);ls.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||(a.id||0)-(b.id||0));const available=ls.reduce((n,l)=>n+(l.quantityRemaining||0),0);if(available<q)throw new Error(`Capas FIFO insuficientes para ${p.brand||'producto'}: ${available} disponibles y ${q} solicitadas.`);let left=q,cost=0,sale=0;const allocations=[];for(const l of ls){if(left<=0)break;const take=Math.min(left,l.quantityRemaining);l.quantityRemaining-=take;await updateRecord('stockLots',l);allocations.push({lotId:l.id,quantity:take,unitCost:l.unitCost||0,unitSale:l.unitSale||0,createdAt:l.createdAt||Date.now()});cost+=take*(l.unitCost||0);sale+=take*(l.unitSale||0);left-=take;}if(left!==0)throw new Error('No se pudo completar el consumo FIFO.');return{allocations,averageCost:roundCUP(cost/q),averageSale:roundCUP(sale/q)};}
+async function consumeStockFIFO(p,q){if(!validInventoryQuantity(q))throw new Error('La cantidad FIFO debe ser positiva (hasta 6 decimales).');const ls=await ensureProductLots(p);ls.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||(a.id||0)-(b.id||0));const available=ls.reduce((n,l)=>n+(l.quantityRemaining||0),0);if(available<q)throw new Error(`Capas FIFO insuficientes para ${p.brand||'producto'}: ${available} disponibles y ${q} solicitadas.`);let left=q,cost=0,sale=0;const allocations=[];for(const l of ls){if(left<=0)break;const take=Math.min(left,l.quantityRemaining);l.quantityRemaining-=take;await updateRecord('stockLots',l);allocations.push({lotId:l.id,quantity:take,unitCost:l.unitCost||0,unitSale:l.unitSale||0,createdAt:l.createdAt||Date.now()});cost+=take*(l.unitCost||0);sale+=take*(l.unitSale||0);left-=take;}if(Math.abs(left)>0.000001)throw new Error('No se pudo completar el consumo FIFO.');return{allocations,averageCost:roundCUP(cost/q),averageSale:roundCUP(sale/q)};}
 async function addStockLot(pid,loc,q,cost,sale,date=Date.now(),movementId=null){if(q>0)return addRecord('stockLots',{productId:pid,location:loc,quantityRemaining:q,originalQuantity:q,unitCost:roundCUP(cost||0),unitSale:roundCUP(sale||0),createdAt:date,movementId});}
-async function quoteStockFIFO(p,q){if(!Number.isInteger(q)||q<1)throw new Error('La cantidad FIFO debe ser un entero positivo.');const ls=await ensureProductLots(p);ls.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||(a.id||0)-(b.id||0));let left=q,cost=0,sale=0;for(const l of ls){if(left<=0)break;const take=Math.min(left,l.quantityRemaining);cost+=take*(l.unitCost||0);sale+=take*(l.unitSale||0);left-=take;}if(left>0)throw new Error(`Stock FIFO insuficiente para ${p.brand||'producto'}.`);return{averageCost:roundCUP(cost/q),averageSale:roundCUP(sale/q)};}
+async function quoteStockFIFO(p,q){if(!validInventoryQuantity(q))throw new Error('La cantidad FIFO debe ser positiva (hasta 6 decimales).');const ls=await ensureProductLots(p);ls.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||(a.id||0)-(b.id||0));let left=q,cost=0,sale=0;for(const l of ls){if(left<=0)break;const take=Math.min(left,l.quantityRemaining);cost+=take*(l.unitCost||0);sale+=take*(l.unitSale||0);left-=take;}if(left>0)throw new Error(`Stock FIFO insuficiente para ${p.brand||'producto'}.`);return{averageCost:roundCUP(cost/q),averageSale:roundCUP(sale/q)};}
 async function restoreStockAllocations(pid,loc,allocs){for(const a of allocs||[]){if(a.lotId){const l=await getRecordById('stockLots',a.lotId);if(l){l.quantityRemaining+=a.quantity;await updateRecord('stockLots',l);continue;}}await addStockLot(pid,loc,a.quantity,a.unitCost,a.unitSale,a.createdAt||Date.now());}}
 
 function updateRecord(storeName, data) { return new Promise((res,rej) => { const tx=db.transaction([storeName],'readwrite'); const s=tx.objectStore(storeName); const r=s.put(data); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
@@ -2764,7 +2776,7 @@ function renderPage() {
                 <td style="font-weight:600">${product.brand}${costPendingBadge}</td>
                 <td style="color:var(--text-2)">${product.color}</td>
                 <td><span class="badge badge-info">${product.category}</span></td>
-                <td style="font-weight:700;font-size:15px">${product.quantity}</td>
+                <td style="font-weight:700;font-size:15px">${product.quantity} <span style="font-size:11px;color:var(--text-3)">${escHtml(product.baseUnit||'unidad')}</span></td>
                 <td>
                     ${ROLES[currentRole].canViewCost ? `<span class="price-display" style="color:var(--text-2)">$${roundCUP(product.price).toFixed(2)}</span>` : ''}
                     <span class="price-display" style="color:#065F46;${ROLES[currentRole].canViewCost?'display:block;font-size:12px;font-weight:700':''}">↗ $${roundCUP(product.salePrice||product.price).toFixed(2)} USD</span>
@@ -2843,6 +2855,13 @@ function filterProducts() {
     renderProductsTable(filtered);
 }
 
+/* UNIT_MEASURE_HELPERS_START */
+function parseSaleUnitsText(raw,baseUnit,basePrice){const base=(String(baseUnit||'unidad').trim()||'unidad'),names=new Set([base.toLocaleLowerCase()]),out=[];for(const line of String(raw||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean)){const p=line.split('|').map(x=>x.trim());if(p.length<2||p.length>3)throw new Error('Formato: Nombre | equivalencia | precio opcional.');const name=p[0],factor=Number(p[1]),price=p[2]===''||p[2]===undefined?Number(basePrice||0)*factor:Number(p[2]);if(!name||names.has(name.toLocaleLowerCase()))throw new Error('Nombre repetido o igual a la unidad base.');if(!Number.isFinite(factor)||factor<=0)throw new Error('La equivalencia debe ser mayor que cero.');if(!Number.isFinite(price)||price<=0)throw new Error('El precio de la presentación debe ser mayor que cero.');names.add(name.toLocaleLowerCase());out.push({name,factor,price});}return out;}
+function getProductSaleUnits(product){const base=(String(product?.baseUnit||'unidad').trim()||'unidad'),basePrice=Number(product?.salePrice||product?.price||0),extra=Array.isArray(product?.saleUnits)?product.saleUnits.filter(u=>u&&String(u.name||'').trim()&&Number.isFinite(Number(u.factor))&&Number(u.factor)>0&&Number.isFinite(Number(u.price))&&Number(u.price)>0):[];return [{name:base,factor:1,price:basePrice},...extra.filter(u=>String(u.name).toLocaleLowerCase()!==base.toLocaleLowerCase()).map(u=>({name:String(u.name).trim(),factor:Number(u.factor),price:Number(u.price)}))];}
+function resolveProductSaleUnit(product,name){const units=getProductSaleUnits(product);return units.find(u=>u.name===name)||units[0];}
+function toBaseQuantity(amount,factor){const q=Number(amount),f=Number(factor);if(!Number.isFinite(q)||q<=0||!Number.isFinite(f)||f<=0)throw new Error('Cantidad y equivalencia deben ser positivas.');const base=Math.round(q*f*1000000)/1000000;if(!Number.isFinite(base)||base<=0)throw new Error('Cantidad convertida inválida.');return base;}
+function validInventoryQuantity(q){const n=Number(q);return Number.isFinite(n)&&n>0&&Math.abs(n*1000000-Math.round(n*1000000))<0.01;}
+/* UNIT_MEASURE_HELPERS_END */
 function openProductModal(productId=null) {
     const modal = document.getElementById('productModal');
     const role  = ROLES[currentRole];
@@ -2878,6 +2897,9 @@ function openProductModal(productId=null) {
             document.getElementById('productColor').value = product.color;
             document.getElementById('productCategory').value = product.category;
             document.getElementById('productQuantity').value = product.quantity;
+            document.getElementById('productBaseUnit').value = product.baseUnit || 'unidad';
+            document.getElementById('productBaseUnit').disabled = true;
+            document.getElementById('productSaleUnits').value = (product.saleUnits||[]).map(u=>u.name+' | '+u.factor+' | '+u.price).join('\n');
             document.getElementById('productPrice').value = product.price || '';
             document.getElementById('productSalePrice').value = product.salePrice||'';
             document.getElementById('productLocation').value = product.location;
@@ -2895,6 +2917,9 @@ function openProductModal(productId=null) {
     } else {
         document.getElementById('productModalTitle').textContent = 'Nuevo Producto';
         document.getElementById('productId').value = '';
+        document.getElementById('productBaseUnit').value = 'unidad';
+        document.getElementById('productBaseUnit').disabled = false;
+        document.getElementById('productSaleUnits').value = '';
         const qtyInput = document.getElementById('productQuantity');
         qtyInput.disabled = false;
         document.getElementById('productQtyHint').classList.add('hidden');
@@ -2912,6 +2937,7 @@ async function closeProductModal(force=false) {
     }
     document.getElementById('productForm').reset();
     document.getElementById('productQuantity').disabled = false;
+    document.getElementById('productBaseUnit').disabled = false;
     document.getElementById('productQtyHint').classList.add('hidden');
     // Limpiar estado de costPending
     const priceInput = document.getElementById('productPrice');
@@ -2931,11 +2957,13 @@ async function saveProduct(event) {
     const location=document.getElementById('productLocation').value.trim();
     const productId=document.getElementById('productId').value;
     const quantity=Number(document.getElementById('productQuantity').value);
+    const baseUnit=(document.getElementById('productBaseUnit').value.trim()||'unidad');
+    const saleUnitsRaw=document.getElementById('productSaleUnits').value;
     const salePriceRaw=parseFloat(document.getElementById('productSalePrice').value);
     const minStock=Number(document.getElementById('productMinStock').value)||0;
     const role = ROLES[currentRole];
     if(!role||!role.canCreateProduct){await appAlert('Tu rol no tiene permiso para crear o editar productos.','warning','Acceso restringido');return;}
-    if(!Number.isInteger(quantity)||quantity<0||!Number.isInteger(minStock)||minStock<0){await appAlert('Las cantidades deben ser números enteros no negativos.','warning','Cantidad inválida');return;}
+    if(!Number.isFinite(quantity)||quantity<0||!Number.isFinite(minStock)||minStock<0||Math.abs(quantity*1000000-Math.round(quantity*1000000))>0.01||Math.abs(minStock*1000000-Math.round(minStock*1000000))>0.01){await appAlert('Las cantidades deben ser números enteros no negativos.','warning','Cantidad inválida');return;}
     if(currentRole!=='admin'&&!accessibleLocationNames.includes(location)){await appAlert('No tienes permiso para registrar productos en esa locación.','warning','Locación no autorizada');return;}
     if(productId){
         const existing=await getRecordById('products',parseInt(productId));
@@ -3007,7 +3035,8 @@ async function saveProduct(event) {
             costPending = originalProduct?.costPending || false;
         }
     }
-    const productData = { brand, color, category, quantity, price, salePrice, location, minStock, dateAdded: originalDateAdded, costPending };
+    let saleUnits;try{saleUnits=parseSaleUnitsText(saleUnitsRaw,baseUnit,salePrice);}catch(err){await appAlert(err.message,'warning','Presentaciones inválidas');return;}
+    const productData = { brand, color, category, quantity, price, salePrice, location, minStock, baseUnit, saleUnits, dateAdded: originalDateAdded, costPending };
     // F1: calcular y almacenar margen (solo si hay precio de costo)
     if (price > 0) {
         productData.margin    = roundCUP(salePrice - price);
@@ -3342,56 +3371,13 @@ async function confirmMultiSale() {
 // ========== FIN: VENTA MÚLTIPLE ==========
 
 // ══ VENTA RÁPIDA ══
-async function openQuickSaleModal(productId) {
-    const product = await getRecordById('products', productId);
-    if (!product) return;
-    if (getLocationType((window.__locationCache||[]).find(l=>l.name===product.location)) === 'Almacén') {
-        await appAlert('Los productos ubicados en almacenes no se pueden vender directamente. Transfiérelos a un punto de venta primero.','warning','Venta no permitida');
-        return;
-    }
-    const fifoQuote=await quoteStockFIFO(product,1),salePrice=fifoQuote.averageSale,displayCost=fifoQuote.averageCost;
-    const profit=salePrice-displayCost;
-    const canViewCost = ROLES[currentRole].canViewCost;
-    const isPending = !displayCost;
-    document.getElementById('quickSaleProductId').value = productId;
-    document.getElementById('quickSaleProductName').textContent = `${product.brand} — ${product.color} · ${product.category}`;
-    document.getElementById('quickSaleStock').textContent = product.quantity;
-    document.getElementById('quickSaleLocation').textContent = product.location;
-    document.getElementById('quickSaleQuantity').value = 1;
-    document.getElementById('quickSaleQuantity').max = product.quantity;
-    document.getElementById('quickSaleNotes').value = '';
-    const rate = getExchangeRate();
-    const costEl = document.getElementById('qpCost');
-    if (isPending) {
-        costEl.textContent = '💲 Costo pendiente';
-        costEl.style.color = 'var(--amber)';
-        costEl.style.fontStyle = 'italic';
-    } else {
-        costEl.textContent = `${displayCost.toFixed(2)} USD (≈ ${roundCUP(displayCost*rate).toFixed(2)} CUP)`;
-        costEl.style.color = '';
-        costEl.style.fontStyle = 'normal';
-    }
-    document.getElementById('qpSale').textContent = `$${salePrice.toFixed(2)} USD (≈ ${roundCUP(salePrice*rate).toFixed(2)} CUP)`;
-    const profitEl = document.getElementById('qpProfit');
-    if (isPending) {
-        profitEl.textContent = '💲 Costo pendiente — solo se registra ingreso';
-        profitEl.style.color = 'var(--amber)';
-        profitEl.style.fontStyle = 'italic';
-    } else {
-        profitEl.textContent = `$${profit.toFixed(2)} USD`;
-        profitEl.style.color = profit<0?'var(--rose)':'var(--emerald)';
-        profitEl.style.fontStyle = 'normal';
-    }
-    // Ocultar precio compra y ganancia para vendedoras
-    const costRow   = document.getElementById('qsCostRow');
-    const profitRow = document.getElementById('qsProfitRow');
-    if (costRow)   costRow.style.display   = canViewCost ? '' : 'none';
-    if (profitRow) profitRow.style.display = canViewCost ? '' : 'none';
-    document.getElementById('quickSaleModal').dataset.salePrice = salePrice;
-    document.getElementById('quickSaleModal').dataset.displayCost = displayCost;
-    document.getElementById('quickSaleModal').classList.add('active');
+async function openQuickSaleModal(productId){
+ const p=await getRecordById('products',productId);if(!p)return;if(getLocationType((window.__locationCache||[]).find(l=>l.name===p.location))==='Almacén'){await appAlert('Los productos ubicados en almacenes no se pueden vender directamente.','warning','Venta no permitida');return;}
+ const us=getProductSaleUnits(p),sel=document.getElementById('quickSaleUnit');sel.innerHTML=us.map((u,i)=>`<option value="${i}">${escHtml(u.name)} — ${u.factor} ${escHtml(p.baseUnit||'unidad')}</option>`).join('');
+ document.getElementById('quickSaleProductId').value=productId;document.getElementById('quickSaleProductName').textContent=`${p.brand} — ${p.color} · ${p.category}`;document.getElementById('quickSaleStock').textContent=p.quantity+' '+(p.baseUnit||'unidad');document.getElementById('quickSaleLocation').textContent=p.location;document.getElementById('quickSaleQuantity').value=1;document.getElementById('quickSaleNotes').value='';sel.value='0';document.getElementById('quickSaleModal').classList.add('active');await updateQuickSaleFIFOEstimate();
 }
-async function updateQuickSaleFIFOEstimate(){const id=parseInt(document.getElementById('quickSaleProductId').value),q=parseInt(document.getElementById('quickSaleQuantity').value)||1,p=await getRecordById('products',id);if(!p||q<1)return;const quote=await quoteStockFIFO(p,Math.min(q,p.quantity)),rate=getExchangeRate(),sale=quote.averageSale,cost=quote.averageCost;document.getElementById('qpSale').textContent=`${sale.toFixed(2)} USD (≈ ${roundCUP(sale*rate).toFixed(2)} CUP)`;document.getElementById('qpCost').textContent=cost>0?`${cost.toFixed(2)} USD (≈ ${roundCUP(cost*rate).toFixed(2)} CUP)`:'Costo pendiente';document.getElementById('qpProfit').textContent=cost>0?`${(sale-cost).toFixed(2)} USD`:'Costo pendiente';document.getElementById('quickSaleModal').dataset.salePrice=sale;document.getElementById('quickSaleModal').dataset.displayCost=cost;}
+async function updateQuickSaleFIFOEstimate(){const p=await getRecordById('products',parseInt(document.getElementById('quickSaleProductId').value));if(!p)return;const us=getProductSaleUnits(p),u=us[Number(document.getElementById('quickSaleUnit').value)||0]||us[0],q=Number(document.getElementById('quickSaleQuantity').value)||0,bq=q>0?toBaseQuantity(q,u.factor):0,input=document.getElementById('quickSaleQuantity');input.max=p.quantity/u.factor;const fifo=bq>0&&bq<=p.quantity?await quoteStockFIFO(p,bq):{averageCost:0},cost=fifo.averageCost*u.factor,rate=getExchangeRate();document.getElementById('qpSale').textContent=`$${u.price.toFixed(2)} ${u.name} (≈ ${roundCUP(u.price*rate).toFixed(2)} CUP)`;document.getElementById('qpCost').textContent=fifo.averageCost>0?`$${cost.toFixed(2)} / ${u.name}`:'Costo pendiente';document.getElementById('qpProfit').textContent=fifo.averageCost>0?`$${(u.price-cost).toFixed(2)} / ${u.name}`:'Costo pendiente';const cv=ROLES[currentRole]?.canViewCost;document.getElementById('qsCostRow').style.display=cv?'':'none';document.getElementById('qsProfitRow').style.display=cv?'':'none';}
+async function saveQuickSale(event){event.preventDefault();if(currentRole==='almacenero'){await appAlert('El rol almacenero no puede registrar ventas.','warning','Acceso restringido');return;}const pid=parseInt(document.getElementById('quickSaleProductId').value),entered=Number(document.getElementById('quickSaleQuantity').value),p=await getRecordById('products',pid);if(!p){await appAlert('No se encontró el producto.','error','Error');return;}if(!validInventoryQuantity(entered)){await appAlert('Cantidad inválida: positiva y hasta 6 decimales.','warning','Cantidad inválida');return;}if(currentRole!=='admin'&&!accessibleLocationNames.includes(p.location)){await appAlert('No tienes acceso a la locación.','warning','Acceso restringido');return;}if(getLocationType((window.__locationCache||[]).find(l=>l.name===p.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}const us=getProductSaleUnits(p),u=us[Number(document.getElementById('quickSaleUnit').value)||0]||us[0],bq=toBaseQuantity(entered,u.factor);if(bq>p.quantity+0.000001){await appAlert(`Stock insuficiente: ${p.quantity} ${p.baseUnit||'unidad'} disponibles.`,'warning','Sin stock');return;}const fifo=await consumeStockFIFO(p,bq),saleBase=u.price/u.factor;p.quantity=Math.max(0,Math.round((p.quantity-bq)*1e6)/1e6);await updateRecord('products',p);await addRecord('movements',{type:'Salida',items:[{productId:pid,quantity:bq,salePrice:roundCUP(saleBase),costPrice:fifo.averageCost,location:p.location,lotAllocations:fifo.allocations,saleUnitName:u.name,saleEnteredQuantity:entered,saleFactor:u.factor,saleUnitPrice:u.price}],sourceLocation:p.location,notes:document.getElementById('quickSaleNotes').value||'Venta rápida',date:Date.now(),undone:false,registeredBy:currentUser||'Admin',exchangeRateUsed:getExchangeRate()});stampLastModified();showToast('Venta registrada y convertida a unidad base.','success','Venta completada');closeQuickSaleModal();loadMovements();loadProducts();loadDashboard();}
 function closeQuickSaleModal() { document.getElementById('quickSaleModal').classList.remove('active'); }
 
 async function saveQuickSale(event) {
@@ -3445,7 +3431,8 @@ function addSaleItem(filterLocation='') {
             </div>
             <div>
                 <label class="form-label">Cantidad *</label>
-                <input type="number" id="itemQty_${idx}" required min="1" value="1" class="form-input" disabled>
+                <input type="number" id="itemQty_${idx}" required min="0.001" step="0.001" value="1" class="form-input" disabled>
+                <select id="itemUnit_${idx}" class="form-input form-select" style="margin-top:6px;display:none"></select>
                 <p style="font-size:11.5px;color:var(--text-3);margin-top:4px">Stock: <span id="itemStock_${idx}">—</span>${showSalePrice?' · Venta: <span id="itemSalePriceLabel_'+idx+'" style="font-weight:600;color:var(--emerald)">—</span>':''}</p>
             </div>
         </div>`;
@@ -3528,7 +3515,9 @@ function selectProductInItem(idx, productId) {
     const stockEl=document.getElementById(`itemStock_${idx}`);
     const saleLabelEl=document.getElementById(`itemSalePriceLabel_${idx}`);
     const qtyInput=document.getElementById(`itemQty_${idx}`);
-    if (stockEl) stockEl.textContent=product.quantity;
+    const unitSel=document.getElementById(`itemUnit_${idx}`);
+    if(unitSel){const us=getProductSaleUnits(product);unitSel.innerHTML=us.map((u,i)=>`<option value="${i}">${escHtml(u.name)} · ${u.factor} ${escHtml(product.baseUnit||'unidad')} · $${u.price.toFixed(2)}</option>`).join('');unitSel.style.display=document.getElementById('movementType').value==='Salida'?'block':'none';unitSel.value='0';}
+    if (stockEl) stockEl.textContent=product.quantity+' '+(product.baseUnit||'unidad');
     if (qtyInput) {
         const movType=document.getElementById('movementType').value;
         if (movType==='Entrada'||movType==='Devolución') { qtyInput.removeAttribute('max'); }
@@ -3647,7 +3636,7 @@ function renderMovementsPage() {
                 <td style="font-size:12.5px;color:var(--text-2)">${date}${movement.undone?'<br><span style="font-size:11px;color:var(--text-3);font-style:italic">Deshecho</span>':''}</td>
                 <td><span class="badge ${badgeClass}">${movement.type}</span></td>
                 <td style="font-size:13px;font-weight:500">${name}</td>
-                <td style="font-weight:700">${item.quantity}</td>
+                <td style="font-weight:700">${movement.type==='Salida'&&item.saleEnteredQuantity!==undefined?item.saleEnteredQuantity+' '+escHtml(item.saleUnitName||''):item.quantity+' '+escHtml(product?.baseUnit||'')}</td>
                 <td style="color:var(--text-2)">${sourceLocation}</td>
                 ${saleCells}
                 <td style="font-size:12.5px;color:var(--text-3)">${movement.notes||'—'}</td>
@@ -3719,11 +3708,14 @@ async function saveMovement(event) {
     for (const div of itemDivs) {
         const idx=div.id.split('_')[1];
         const productId=parseInt(document.getElementById(`itemProduct_${idx}`).value);
-        const quantity=parseInt(document.getElementById(`itemQty_${idx}`).value);
+        const enteredQuantity=Number(document.getElementById(`itemQty_${idx}`).value);
+        let quantity=enteredQuantity;
         if (!productId) { await appAlert('Selecciona un producto en todos los campos.','warning','⚠️ Producto requerido'); return; }
-        if (!quantity||quantity<1) { await appAlert('La cantidad debe ser mayor que cero.','warning','⚠️ Cantidad inválida'); return; }
+        if (!validInventoryQuantity(enteredQuantity)) { await appAlert('Cantidad inválida: positiva y hasta 6 decimales.','warning','Cantidad inválida'); return; }
         const product=await getRecordById('products',productId);
         if (!product) { await appAlert('No se pudo encontrar el producto.','error','Error'); return; }
+        const ui=Number(document.getElementById(`itemUnit_${idx}`)?.value||0),us=getProductSaleUnits(product),saleUnit=type==='Salida'?(us[ui]||us[0]):{name:product.baseUnit||'unidad',factor:1,price:product.salePrice||product.price};
+        if(type==='Salida')quantity=toBaseQuantity(enteredQuantity,saleUnit.factor);
         const sourceLoc=(window.__locationCache||[]).find(l=>l.name===product.location);
         if(currentRole==='almacenero'&&getLocationType(sourceLoc)!=='Almacén'){await appAlert('El almacenero solo puede operar con productos ubicados en almacenes.','warning','Acceso restringido');return;}
         if(type==='Salida'&&getLocationType(sourceLoc)==='Almacén'){await appAlert('No se puede vender desde un almacén. Transfiere el producto a un punto de venta.','warning','Locación no vendible');return;}
@@ -3731,7 +3723,7 @@ async function saveMovement(event) {
         if ((type==='Salida'||type==='Merma'||type==='Transferencia')&&quantity>product.quantity) {
             await appAlert(`Stock insuficiente para "${product.brand}".\nDisponible: ${product.quantity} · Solicitado: ${quantity}`,'warning','⚠️ Stock insuficiente'); return;
         }
-        itemsToProcess.push({productId, quantity, product});
+        itemsToProcess.push({productId,quantity,product,enteredQuantity,saleUnit});
     }
     if (type==='Transferencia') {
         const newLoc=document.getElementById('movementNewLocation').value;
@@ -3760,9 +3752,9 @@ async function saveMovement(event) {
     const newProdsToCreate  = [];   // productos destino nuevos (Transferencia a ubicación sin registro)
     const prodIdsToDelete   = [];   // BF-4: orígenes con quantity=0 tras transferencia total
 
-    for (const {productId, quantity, product} of itemsToProcess) {
+    for (const {productId,quantity,product,saleUnit,enteredQuantity} of itemsToProcess) {
         const frozenCost  = roundCUP(product.price);
-        const frozenSale  = (type==='Salida'||type==='Devolución') ? roundCUP(product.salePrice||product.price) : null;
+        const frozenSale  = type==='Salida'?roundCUP(saleUnit.price/saleUnit.factor):(type==='Devolución'?roundCUP(product.salePrice||product.price):null);
         const itemLocation = product.location;
         let destProductId = null, destLocation = null;
 
@@ -3806,7 +3798,7 @@ async function saveMovement(event) {
             destLocation = newLocation;
         }
 
-        movementsToSave.push({productId, quantity, frozenSale, frozenCost, itemLocation, destProductId, destLocation, product});
+        movementsToSave.push({productId,quantity,frozenSale,frozenCost,itemLocation,destProductId,destLocation,product,saleUnit,enteredQuantity});
     }
 
     // ── Crear productos nuevos de destino y resolver tempIds ──
@@ -3842,9 +3834,7 @@ async function saveMovement(event) {
         const unitCost=fifo?fifo.averageCost:entryUnitCost, unitSale=fifo?fifo.averageSale:entryUnitSale;
         const movId = await addRecord('movements', {
             type,
-            items: [{ productId: mov.productId, quantity: mov.quantity, salePrice: roundCUP(unitSale||0),
-                      costPrice: roundCUP(unitCost||0), location: mov.itemLocation,
-                      destProductId: realDestId, destLocation: type==='Merma'?'Merma':mov.destLocation, lotAllocations:fifo?.allocations||[], pricesChanged:type==='Entrada'&&(entryCost!==null||entrySale!==null), previousCostPrice:mov.product.price, previousSalePrice:mov.product.salePrice }],
+            items: [{productId:mov.productId,quantity:mov.quantity,salePrice:roundCUP(mov.frozenSale??unitSale??0),costPrice:roundCUP(unitCost||0),location:mov.itemLocation,destProductId:realDestId,destLocation:type==='Merma'?'Merma':mov.destLocation,lotAllocations:fifo?.allocations||[],saleUnitName:type==='Salida'?mov.saleUnit.name:(mov.product.baseUnit||'unidad'),saleEnteredQuantity:type==='Salida'?mov.enteredQuantity:mov.quantity,saleFactor:type==='Salida'?mov.saleUnit.factor:1,saleUnitPrice:type==='Salida'?mov.saleUnit.price:null,pricesChanged:type==='Entrada'&&(entryCost!==null||entrySale!==null),previousCostPrice:mov.product.price,previousSalePrice:mov.product.salePrice}],
             sourceLocation: sourceLocation || mov.itemLocation || '',
             notes,
             date: sharedDate,
