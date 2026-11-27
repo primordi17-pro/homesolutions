@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const html = fs.readFileSync('index.html','utf8');
 const block = html.match(/\/\* UNIT_MEASURE_HELPERS_START \*\/([\s\S]*?)\/\* UNIT_MEASURE_HELPERS_END \*\//);
 assert.ok(block,'Unit helper block must exist');
-const api = new Function(block[1] + '\\nreturn {parseSaleUnitsText,getProductSaleUnits,toBaseQuantity,validInventoryQuantity};')();
+const api = new Function(block[1] + '\nreturn {parseSaleUnitsText,getProductSaleUnits,toBaseQuantity,validInventoryQuantity};')();
 const units = api.parseSaleUnitsText('Saco | 25 | 6.50\\nCaja | 1.44 | 8.00\\nRollo | 100', 'kg', 0.20);
 assert.deepEqual(units.map(u=>[u.name,u.factor,u.price]),[['Saco',25,6.5],['Caja',1.44,8],['Rollo',100,20]]);
 const product={baseUnit:'kg',salePrice:0.2,saleUnits:units};
