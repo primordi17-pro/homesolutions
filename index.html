@@ -3230,8 +3230,7 @@ async function openMultiSaleModal() {
     listEl.innerHTML = '';
     const rate = getExchangeRate();
     selected.sort((a,b) => a.brand.localeCompare(b.brand)).forEach(p => {
-        const sp       = roundCUP(p.salePrice || p.price || 0);
-        const spCUP    = roundCUP(sp * rate);
+        const saleUnits=getProductSaleUnits(p),sp=saleUnits[0].price,spCUP=roundCUP(sp*rate);
         const sinStock = p.quantity === 0;
         const div      = document.createElement('div');
         div.className  = 'ms-sale-item';
@@ -3250,12 +3249,8 @@ async function openMultiSaleModal() {
             </div>
             <div style="display:flex;align-items:center;gap:12px">
                 <label style="font-size:12px;font-weight:600;color:var(--text-2);white-space:nowrap;text-transform:uppercase;letter-spacing:0.4px">Cantidad</label>
-                <input type="number" class="form-input ms-qty-input"
-                    data-product-id="${p.id}" data-sale-price="${sp}" data-max="${p.quantity}"
-                    min="${sinStock?0:1}" max="${p.quantity}" value="${sinStock?0:1}"
-                    ${sinStock?'disabled':''}
-                    style="width:90px;padding:6px 10px"
-                    oninput="updateMultiSaleTotal()">
+                <input type="number" class="form-input ms-qty-input" data-product-id="${p.id}" data-sale-price="${sp}" data-max="${p.quantity}" min="0" step="0.001" max="${p.quantity}" value="${sinStock?0:1" ${sinStock?'disabled':''} style="width:90px;padding:6px 10px" oninput="updateMultiSaleTotal()">
+                <select class="form-input ms-unit-select" data-product-id="${p.id}" onchange="updateMultiSaleTotal()" style="max-width:150px;margin-left:8px">${saleUnits.map((u,i)=>`<option value="${i}">${escHtml(u.name)} · ${u.factor} ${escHtml(p.baseUnit||'unidad')}</option>`).join('')}</select>
                 <div style="flex:1;text-align:right">
                     <span style="font-size:12px;color:var(--text-3)">Subtotal</span>
                     <span class="mono ms-subtotal" style="font-weight:700;color:#065F46;display:block;font-size:14px">$${sinStock?'0.00':sp.toFixed(2)}</span>
@@ -3272,20 +3267,7 @@ async function openMultiSaleModal() {
     document.getElementById('multiSaleModal').classList.add('active');
 }
 
-async function updateMultiSaleTotal() {
-    let total=0;
-    for(const input of document.querySelectorAll('.ms-qty-input:not(:disabled)')) {
-        const max=parseInt(input.dataset.max)||0,raw=parseInt(input.value)||0,qty=Math.max(0,Math.min(raw,max));
-        const p=productsById[parseInt(input.dataset.productId)];
-        const quote=p&&qty>0?await quoteStockFIFO(p,qty):{averageSale:parseFloat(input.dataset.salePrice)||0};
-        const price=quote.averageSale||0;input.dataset.salePrice=price;
-        const sub=roundCUP(qty*price);total=roundCUP(total+sub);
-        const subEl=input.closest('.ms-sale-item')?.querySelector('.ms-subtotal');if(subEl)subEl.textContent=`${sub.toFixed(2)}`;
-    }
-    const totalEl = document.getElementById('multiSaleTotal');
-    const totalCUP = roundCUP(total * getExchangeRate());
-    if (totalEl) totalEl.textContent = `$${total.toFixed(2)} USD ≈ ${totalCUP.toFixed(2)} CUP`;
-}
+async function updateMultiSaleTotal(){let total=0;for(const input of document.querySelectorAll('.ms-qty-input:not(:disabled)')){const p=productsById[parseInt(input.dataset.productId)],sel=input.closest('.ms-sale-item')?.querySelector('.ms-unit-select'),us=p?getProductSaleUnits(p):[],u=us[Number(sel?.value)||0]||us[0],entered=Number(input.value)||0;input.max=p&&u?p.quantity/u.factor:0;const subtotal=roundCUP(entered*(u?.price||0));total=roundCUP(total+subtotal);const sub=input.closest('.ms-sale-item')?.querySelector('.ms-subtotal');if(sub)sub.textContent=subtotal.toFixed(2);}const el=document.getElementById('multiSaleTotal');if(el)el.textContent=`$${total.toFixed(2)} USD ≈ ${roundCUP(total*getExchangeRate()).toFixed(2)} CUP`;}
 
 function closeMultiSaleModal() {
     document.getElementById('multiSaleModal').classList.remove('active');
@@ -3302,22 +3284,18 @@ async function confirmMultiSale() {
         const saleNotes = document.getElementById('multiSaleNotes').value.trim() || 'Venta múltiple';
         for (const input of document.querySelectorAll('.ms-qty-input:not(:disabled)')) {
             const productId = parseInt(input.dataset.productId);
-            const max       = parseInt(input.dataset.max) || 0;
-            const qty       = Math.max(0, Math.min(parseInt(input.value)||0, max));
-            if (qty === 0) continue;
-            const product   = productsById[productId];
+            const product=productsById[productId],unitSel=input.closest('.ms-sale-item')?.querySelector('.ms-unit-select'),us=product?getProductSaleUnits(product):[],saleUnit=us[Number(unitSel?.value)||0]||us[0],entered=Number(input.value)||0,qty=product&&saleUnit&&entered>0?toBaseQuantity(entered,saleUnit.factor):0;
+            if(entered===0)continue;
             if (!product) continue;
             if(getLocationType((window.__locationCache||[]).find(l=>l.name===product.location))==='Almacén'){await appAlert('No se puede vender desde un almacén.','warning','Locación no vendible');return;}
-            if (qty > product.quantity) {
+            if (qty > product.quantity+0.000001) {
                 await appAlert(`Stock insuficiente para "${escHtml(product.brand)}". Disponible: ${product.quantity}.`, 'warning', '⚠️ Sin stock suficiente');
                 return;
             }
             items.push({
                 productId,
                 quantity:  qty,
-                salePrice: roundCUP(product.salePrice || product.price || 0),
-                costPrice: roundCUP(product.price || 0),
-                location:  product.location
+                salePrice:roundCUP(saleUnit.price/saleUnit.factor),costPrice:roundCUP(product.price||0),location:product.location,saleUnitName:saleUnit.name,saleEnteredQuantity:entered,saleFactor:saleUnit.factor,saleUnitPrice:saleUnit.price
             });
         }
 
@@ -3334,8 +3312,8 @@ async function confirmMultiSale() {
             const p = await getRecordById('products', item.productId);
             if (!p) continue;
             const fifo=await consumeStockFIFO(p,item.quantity);
-            item.salePrice=fifo.averageSale;item.costPrice=fifo.averageCost;item.lotAllocations=fifo.allocations;
-            p.quantity -= item.quantity;
+            item.costPrice=fifo.averageCost;item.lotAllocations=fifo.allocations;
+            p.quantity=Math.max(0,Math.round((p.quantity-item.quantity)*1e6)/1e6);
             await updateRecord('products', p);
             productsById[p.id] = p;
 
@@ -3350,7 +3328,7 @@ async function confirmMultiSale() {
                 registeredBy:   currentUser || 'Admin',
                 exchangeRateUsed: getExchangeRate()
             });
-            totalSale = roundCUP(totalSale + roundCUP(item.salePrice * item.quantity));
+            totalSale=roundCUP(totalSale+roundCUP((item.saleUnitPrice||item.salePrice*item.saleFactor)*item.saleEnteredQuantity));
         }
 
         stampLastModified();
