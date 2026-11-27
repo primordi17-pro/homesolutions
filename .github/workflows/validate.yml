@@ -39,3 +39,5 @@ jobs:
           assert.match(html, /Capas FIFO utilizadas/);
           console.log('Inline JavaScript parsed and critical inventory guards found.');
           NODE
+      - name: Test configurable sales units
+        run: node tests/sale-units.test.js
