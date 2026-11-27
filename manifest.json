@@ -1,0 +1,11 @@
+{
+  "id": "./",
+  "name": "TechInventory - Sistema de Gestión",
+  "short_name": "TechInventory",
+  "description": "Inventario y gestión de ventas offline",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#0F2149"
+}
