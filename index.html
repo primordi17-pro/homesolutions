@@ -2325,7 +2325,7 @@ function initDatabase() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
         request.onerror = () => reject(request.error);
-        request.onsuccess = (e) => { db = e.target.result; resolve(); };
+        request.onsuccess = async (e) => { db = e.target.result; try { await reconcileDefaultProductCategories(); resolve(); } catch(error) { console.error('[Categorías] No se pudieron ajustar categorías:',error); resolve(); } };
         request.onupgradeneeded = (e) => {
             db = e.target.result;
             const tx = e.target.transaction;
@@ -2358,11 +2358,7 @@ function initDatabase() {
                 const catDynStore = db.createObjectStore('categories', { keyPath:'id', autoIncrement:true });
                 catDynStore.createIndex('isActive','isActive',{unique:false});
                 // Seed: categorías hoy hardcodeadas en los <select>, para no perder continuidad
-                const seedCategories = [
-                    'Sistema Eléctrico','Motor','Cilindros','Transmisión','Frenos','Suspensión',
-                    'Carrocería','Accesorios','Herramientas','Neumáticos','Rodamientos','Combustible',
-                    'Iluminación','Otros'
-                ];
+                const seedCategories = ['Carrocería','Cilindros','Materiales de construcción'];
                 seedCategories.forEach(name => catDynStore.add({ name, isActive:true }));
             }
             if (!db.objectStoreNames.contains('locations')) {
@@ -2469,6 +2465,14 @@ async function refreshCatalogSelects() {
     applyLocationFilters();
 }
 
+async function reconcileDefaultProductCategories() {
+ const defaults=['Carrocería','Cilindros','Materiales de construcción'];
+ const legacy=['Sistema Eléctrico','Motor','Transmisión','Frenos','Suspensión','Accesorios','Herramientas','Neumáticos','Rodamientos','Combustible','Iluminación','Otros'];
+ const [cats,products]=await Promise.all([getAllRecords('categories'),getAllRecords('products')]);
+ const used=new Set(products.map(p=>String(p.category||'').toLocaleLowerCase()));
+ for(const cat of cats){if(defaults.some(n=>n.toLocaleLowerCase()===String(cat.name).toLocaleLowerCase()))continue;if(used.has(String(cat.name||'').toLocaleLowerCase()))continue;if(cat.isDefault||legacy.includes(cat.name))await deleteRecord('categories',cat.id);}
+ const remaining=await getAllRecords('categories');for(const name of defaults)if(!remaining.some(c=>String(c.name).toLocaleLowerCase()===name.toLocaleLowerCase()))await addRecord('categories',{name,isActive:true,isDefault:true});
+}
 // ── Gestor de Categorías de Producto ──
 async function openCategoryManager() {
     await loadProductCategoriesTable();
@@ -2609,6 +2613,7 @@ async function loadLocationsTable() {
                     <div style="display:flex;gap:6px">
                         <button class="btn-icon" onclick="openLocationModal(${l.id})" title="Editar">✏️</button>
                         <button class="btn-icon" onclick="toggleLocationActive(${l.id},${active})" title="${active?'Desactivar':'Activar'}">${active?'🔴':'🟢'}</button>
+                        <button class="btn-icon danger" onclick="deleteLocation(${l.id})" title="Eliminar locación">🗑️</button>
                     </div>
                 </td>
             </tr>`;
@@ -2667,6 +2672,16 @@ async function saveLocation(event) {
     await refreshCatalogSelects();
 }
 
+async function deleteLocation(locId) {
+ if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar locaciones.','warning','Acceso restringido');return;}
+ const loc=await getRecordById('locations',locId);if(!loc)return;
+ if(loc.special==='merma'||loc.name==='Merma'){await appAlert('La locación especial de mermas no se puede eliminar.','warning','Locación protegida');return;}
+ const [products,movements,lots]=await Promise.all([getAllRecords('products'),getAllRecords('movements'),getAllRecords('stockLots')]);
+ const productUse=products.some(p=>p.location===loc.name);const movementUse=movements.some(m=>m.sourceLocation===loc.name||m.destLocation===loc.name||m.location===loc.name||(Array.isArray(m.items)&&m.items.some(it=>it.location===loc.name)));const lotUse=lots.some(l=>l.location===loc.name);
+ if(productUse||movementUse||lotUse){await appAlert('No se puede eliminar: esta locación está vinculada a productos, movimientos históricos o lotes FIFO. Reasigna el inventario y conserva el historial; después podrás eliminarla.','warning','Locación en uso');return;}
+ if(!await appConfirm('¿Eliminar definitivamente la locación '+loc.name+'? Esta acción no se puede deshacer.','error','Eliminar locación','Eliminar','Cancelar','danger'))return;
+ await deleteRecord('locations',locId);showToast('Locación eliminada.','success','Eliminado');await loadLocationsTable();await refreshAccessibleLocations();await refreshCatalogSelects();
+}
 async function toggleLocationActive(locId, currentlyActive) {
     if(!ROLES[currentRole]?.canManageCatalog){await appAlert('Tu rol no puede administrar locaciones.','warning','Acceso restringido');return;}
     if (currentlyActive) {
